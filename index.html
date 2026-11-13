@@ -282,6 +282,7 @@ const SNAPSHOT = {"asOf":"2026-11-13T00:35:32Z","players":[{"n":"Soans, Gladson"
 /* LOGIC-START */
 const MILESTONES = [100, 150, 200, 250];
 const MATCH_WATCH_RANGE = 3; /* matches watchlist: 3 matches below a milestone or fewer (97, 98, 99 and so on) */
+const CROSS_LOOKBACK_DAYS = 40; /* match detail is only checked for matches this recent; the longest window shown is 28 days */
 const ACTIVE_DAYS = 240;     /* a player with no Cheetahs match in this many days is treated as dormant */
 
 /* Career statistics tracked for "crossed a milestone" and the watchlist.
@@ -389,13 +390,26 @@ async function teamIdsFor(api, seasons) {
   await Promise.all(seasons.map(async s => { for (const t of await api.getTeams(s.id)) ids.set(t.id, gradeLabel(t)); }));
   return ids;
 }
-/* The club grades a player appeared in, most matches first. */
-function teamsOf(matches, teamIds) {
+/* Which club team did this player play for in this match? Returns a team id, or null if they played for the other side.
+   A match lists a club team even when the player was in the opposition, so when the match has only one club team the
+   match detail (which lists each side's players) says which side they were on. */
+async function clubSideOf(api, playerId, m, teamIds) {
+  const listed = m.teams || [];
+  const club = listed.filter(t => teamIds.has(t.id));
+  if (!club.length) return null;
+  if (club.length === listed.length) return club[0].id; /* both sides are club teams */
+  const detail = await api.getMatch(m.id);
+  const sides = (detail && (detail.Teams || detail.teams)) || [];
+  const mine = sides.find(t => (t.Players || t.players || []).some(x => (x.ParticipantId || x.participantId) === playerId));
+  if (!mine) return club[0].id; /* squads missing: keep the match, as before */
+  const sideId = mine.Id || mine.id;
+  return teamIds.has(sideId) ? sideId : null;
+}
+/* The club grades a player appeared in, most matches first. sideIds = club team id per match. */
+function teamsOf(sideIds, teamIds) {
   const count = new Map();
-  for (const m of matches) {
-    const t = (m.teams || []).find(x => teamIds.has(x.id));
-    if (!t) continue;
-    const label = teamIds.get(t.id);
+  for (const id of sideIds) {
+    const label = teamIds.get(id);
     if (label) count.set(label, (count.get(label) || 0) + 1);
   }
   return [...count].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(e => e[0]);
@@ -412,9 +426,13 @@ async function findRecentlyActive(api, now, ids) {
     try {
       for (const s of seasons) {
         const perf = await api.getPerf(id, s.id);
-        const club = (Array.isArray(perf) ? perf : []).filter(m => (m.teams || []).some(t => teamIds.has(t.id)));
+        const club = [];
+        for (const m of (Array.isArray(perf) ? perf : [])) {
+          const side = await clubSideOf(api, id, m, teamIds);
+          if (side) club.push({ day: matchFinalDay(m), side });
+        }
         if (!club.length) continue; /* nothing for the club this season, look at the one before */
-        result.set(id, { active: club.some(m => matchFinalDay(m) >= cutoff), teams: teamsOf(club, teamIds) });
+        result.set(id, { active: club.some(c => c.day >= cutoff), teams: teamsOf(club.map(c => c.side), teamIds) });
         return;
       }
       result.set(id, { active: false, teams: [] });
@@ -423,7 +441,7 @@ async function findRecentlyActive(api, now, ids) {
   return result;
 }
 
-/* api = { getBowlPage(offset), getBatPage(offset), getSeasons(), getTeams(seasonId), getPerf(playerId, seasonId) } */
+/* api = { getBowlPage(offset), getBatPage(offset), getSeasons(), getTeams(seasonId), getPerf(playerId, seasonId), getMatch(matchId) } */
 async function buildCrossData(api, now, cfg, onTotals) {
   const totals = await loadTotals(api[cfg.page], cfg);
   const watch = watchlist(totals, cfg.ms, p => p.n, p => p.v, cfg.range);
@@ -431,6 +449,7 @@ async function buildCrossData(api, now, cfg, onTotals) {
   const cands = totals.filter(p => cfg.ms.some(M => p.v >= M && p.v <= M + cfg.margin));
   const seasons = newestSeasons(await api.getSeasons(), now, 2); /* two newest seasons cover a month-long window even at a season boundary */
   const teamIds = await teamIdsFor(api, seasons);
+  const oldest = addDays(ymdSydney(now), -CROSS_LOOKBACK_DAYS);
   let failed = 0;
   const players = await mapLimit(cands, 6, async p => {
     const matches = new Map();
@@ -438,7 +457,10 @@ async function buildCrossData(api, now, cfg, onTotals) {
       try {
         const perf = await api.getPerf(p.id, s.id);
         for (const m of (Array.isArray(perf) ? perf : [])) {
-          if ((m.teams || []).some(t => teamIds.has(t.id))) matches.set(m.id, { d: matchFinalDay(m), x: cfg.inMatch(m) });
+          const d = matchFinalDay(m);
+          const x = cfg.inMatch(m);
+          if (d < oldest || !x) continue; /* too old to matter, or nothing scored: no need to check the side */
+          if (await clubSideOf(api, p.id, m, teamIds)) matches.set(m.id, { d, x });
         }
       } catch (e) { failed++; break; }
     }
@@ -488,6 +510,7 @@ function makeApi() {
     getBatPage: statsPage("batting-statistics", "BattingAggregate:desc"),
     getSeasons: () => once("seasons", async () => (await getJSON("/fixturesladders/organisations/" + ORG + "/seasons?jsconfig=eccn%3Atrue")).seasons || []),
     getTeams: id => once("teams" + id, async () => (await getJSON("/fixturesladders/organisations/" + ORG + "/teams?seasonId=" + id + "&jsconfig=eccn%3Atrue")).teams || []),
+    getMatch: id => once("match" + id, () => getJSON("/scores/matches/" + id)),
     getPerf: (pid, sid) => once("perf" + pid + sid, () => getJSON("/scores/players/" + pid + "/match-performances?seasonId=" + sid + "&matchTypeId=&ageGroupCategoryId=&jsconfig=eccn%3Atrue"))
   };
 }
