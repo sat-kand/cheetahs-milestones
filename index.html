@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cheetahs Milestone Watch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: one summary line on top, four milestone columns beneath, each a plain list of names. */
+:root {
+  --bg: #f3f6f5;
+  --surface: #ffffff;
+  --ink: #14211d;
+  --muted: #5a6b66;
+  --line: #d5dedb;
+  --accent: #1d5c4a;
+  --accent-ink: #ffffff;
+  --accent-soft: #dcece6;
+  --font-display: "Barlow Condensed", "Arial Narrow", Arial, sans-serif;
+  --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1816;
+    --surface: #17231f;
+    --ink: #e8f0ed;
+    --muted: #93a8a1;
+    --line: #2a3b36;
+    --accent: #5fc4a2;
+    --accent-ink: #08201a;
+    --accent-soft: #1e3a31;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1816;
+  --surface: #17231f;
+  --ink: #e8f0ed;
+  --muted: #93a8a1;
+  --line: #2a3b36;
+  --accent: #5fc4a2;
+  --accent-ink: #08201a;
+  --accent-soft: #1e3a31;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.45;
+}
+.wrap { max-width: 1040px; margin: 0 auto; padding: 28px 16px 48px; display: flex; flex-direction: column; gap: 24px; }
+header { display: flex; flex-direction: column; gap: 4px; }
+h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 2.2rem;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  text-wrap: balance;
+}
+.sub { margin: 0; color: var(--muted); font-size: 0.95rem; }
+.sub a { color: var(--accent); }
+.summary {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 6px solid var(--accent);
+  border-radius: 6px;
+  padding: 16px 18px;
+  font-size: 1.08rem;
+  text-wrap: balance;
+}
+.summary strong { font-weight: 600; }
+.controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--surface); }
+.seg button {
+  font: inherit; font-size: 0.92rem; font-weight: 500;
+  padding: 8px 14px; border: 0; background: transparent; color: var(--ink); cursor: pointer;
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.seg button:hover:not([aria-pressed="true"]) { background: var(--accent-soft); }
+.copy {
+  font: inherit; font-size: 0.92rem; font-weight: 500;
+  padding: 8px 14px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--surface); color: var(--ink); cursor: pointer;
+}
+.copy:hover { background: var(--accent-soft); }
+.actions { display: flex; gap: 8px; }
+.refresh {
+  font: inherit; font-size: 0.92rem; font-weight: 600;
+  padding: 8px 16px; border: 1px solid var(--accent); border-radius: 6px;
+  background: var(--accent); color: var(--accent-ink); cursor: pointer;
+}
+.refresh:hover:not(:disabled) { filter: brightness(1.08); }
+.refresh:disabled { opacity: 0.65; cursor: progress; }
+.sub .bad { color: #b3261e; font-weight: 500; }
+:root[data-theme="dark"] .sub .bad { color: #ff9b94; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .sub .bad { color: #ff9b94; } }
+button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+.big { font-family: var(--font-display); font-weight: 700; font-size: 2.6rem; line-height: 1; color: var(--accent); font-variant-numeric: tabular-nums; }
+.label { color: var(--muted); font-size: 0.9rem; text-align: right; }
+ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+li { display: flex; flex-direction: column; gap: 2px; }
+.name { font-weight: 600; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 0.88rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.pill.now { background: var(--accent); color: var(--accent-ink); }
+.empty { color: var(--muted); font-size: 0.95rem; margin: 0; }
+footer { color: var(--muted); font-size: 0.85rem; }
+@media (max-width: 420px) { h1 { font-size: 1.8rem; } .big { font-size: 2.2rem; } }
+@media (prefers-reduced-motion: no-preference) { .seg button, .copy { transition: background 0.12s; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Cheetahs Milestone Watch</h1>
+    <p class="sub">Parramatta Cheetahs Cricket Club, all seasons, all teams. <span id="status">Loading the latest data…</span> Source: <a href="https://play.cricket.com.au/stats?cat=battingAvgs&amp;orgId=4059f1b9-86d8-eb11-a7ad-2818780da0cc">Play Cricket batting averages</a>.</p>
+  </header>
+
+  <div class="summary" id="summary"></div>
+
+  <div class="controls">
+    <div class="seg" role="group" aria-label="How close to a milestone">
+      <button type="button" data-gap="0" aria-pressed="true">On 99, 149, 199, 249</button>
+      <button type="button" data-gap="2" aria-pressed="false">Within 2 games</button>
+      <button type="button" data-gap="5" aria-pressed="false">Within 5 games</button>
+    </div>
+    <div class="actions"><button type="button" class="refresh" id="refresh">Refresh</button><button type="button" class="copy" id="copy">Copy list</button></div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <footer>Match counts come from the batting statistics, so they follow the same numbers as the club page. "Next game" means the player has played one match fewer than the milestone.</footer>
+</div>
+
+<script>
+const API = "https://grassrootsapiproxy.cricket.com.au/participants/organisations/4059f1b9-86d8-eb11-a7ad-2818780da0cc/batting-statistics";
+/* Saved copy shown until the live data arrives, and kept if Play Cricket cannot be reached. */
+const SNAPSHOT = {"asOf":"2026-11-13T00:35:32Z","players":[{"n":"Soans, Gladson","m":98},{"n":"Vivekanandan, Pragadeeswaran","m":98},{"n":"Henry, Richard Derrick","m":96},{"n":"Mohan, Karthik","m":96},{"n":"Perumal, Rameshraja","m":96},{"n":"Krishnakumar, Prasanna","m":95},{"n":"Seetharaman, Shankar Ram","m":95}]};
+
+/* LOGIC-START */
+const MILESTONES = [100, 150, 200, 250];
+
+function displayName(n) {
+  const i = n.indexOf(",");
+  return i < 0 ? n : n.slice(i + 1).trim() + " " + n.slice(0, i).trim();
+}
+function milestoneFor(m) {
+  for (const t of MILESTONES) { const gap = (t - 1) - m; if (gap >= 0 && gap <= 5) return { t, gap }; }
+  return null;
+}
+function computeRows(players) {
+  return players.map(p => ({ name: displayName(p.n), m: p.m, ...milestoneFor(p.m) }))
+    .filter(r => r.t).sort((a, b) => a.t - b.t || a.gap - b.gap || a.name.localeCompare(b.name));
+}
+/* Pages overlap (step 50, size 100) so ties at a page edge cannot hide a player. Sorted by matches, highest first. */
+async function loadPlayers(fetchPage) {
+  const map = new Map();
+  for (let off = 1; off <= 2001; off += 50) {
+    const rows = await fetchPage(off);
+    if (!rows.length) break;
+    for (const p of rows) map.set(p.id, { n: p.name, m: p.statistics.matches });
+    const min = Math.min(...rows.map(r => r.statistics.matches));
+    if (min < 90 || rows.length < 100) break;
+  }
+  return [...map.values()];
+}
+/* LOGIC-END */
+
+async function fetchPage(offset) {
+  const q = new URLSearchParams({ offset: String(offset), limit: "100", sort: "Matches:desc", jsconfig: "eccn:true" });
+  const r = await fetch(API + "?" + q.toString());
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  const j = await r.json();
+  return j.participants || [];
+}
+
+let maxGap = 0;
+let players = SNAPSHOT.players;
+let rows = computeRows(players);
+let asOf = SNAPSHOT.asOf;
+
+function fmtDate(iso) {
+  try {
+    return new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(iso));
+  } catch (e) { return iso; }
+}
+function names(list) {
+  const n = list.map(r => r.name);
+  if (n.length <= 1) return n.join("");
+  return n.slice(0, -1).join(", ") + " and " + n[n.length - 1];
+}
+function renderSummary() {
+  const exact = rows.filter(r => r.gap === 0);
+  const el = document.getElementById("summary");
+  if (exact.length) {
+    el.innerHTML = "<strong>" + exact.length + (exact.length === 1 ? " player is" : " players are") + " one game from a milestone:</strong> " + names(exact) + ".";
+  } else {
+    const best = rows.length ? Math.min(...rows.map(x => x.gap)) : null;
+    const closest = best === null ? [] : rows.filter(r => r.gap === best);
+    el.innerHTML = "<strong>Nobody is on 99, 149, 199 or 249 matches this week.</strong>" +
+      (closest.length ? " Closest: " + names(closest) + " on " + closest[0].m + "." : "");
+  }
+}
+function render() {
+  const grid = document.getElementById("grid");
+  grid.innerHTML = "";
+  for (const t of MILESTONES) {
+    const list = rows.filter(r => r.t === t && r.gap <= maxGap);
+    const card = document.createElement("section");
+    card.className = "card";
+    card.setAttribute("aria-label", "Approaching " + t + " matches");
+    const head = document.createElement("div");
+    head.className = "card-head";
+    head.innerHTML = '<span class="big">' + t + '</span><span class="label">' + list.length + (list.length === 1 ? " player" : " players") + "</span>";
+    card.appendChild(head);
+    if (!list.length) {
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = maxGap === 0 ? "Nobody on " + (t - 1) + " matches." : "Nobody within " + maxGap + " games of " + (t - 1) + ".";
+      card.appendChild(p);
+    } else {
+      const ul = document.createElement("ul");
+      for (const r of list) {
+        const li = document.createElement("li");
+        const nm = document.createElement("span"); nm.className = "name"; nm.textContent = r.name;
+        const meta = document.createElement("span"); meta.className = "meta";
+        const played = document.createElement("span"); played.textContent = r.m + " played";
+        const pill = document.createElement("span");
+        pill.className = "pill" + (r.gap === 0 ? " now" : "");
+        pill.textContent = r.gap === 0 ? "Next game is #" + t : r.gap + (r.gap === 1 ? " game" : " games") + " from " + (t - 1);
+        meta.append(played, pill);
+        li.append(nm, meta);
+        ul.appendChild(li);
+      }
+      card.appendChild(ul);
+    }
+    grid.appendChild(card);
+  }
+}
+function setStatus(kind) {
+  const el = document.getElementById("status");
+  if (kind === "loading") el.textContent = "Loading the latest data…";
+  else if (kind === "live") el.textContent = "Live data, loaded " + fmtDate(asOf) + ".";
+  else el.innerHTML = '<span class="bad">Could not reach Play Cricket. Showing saved data from ' + fmtDate(asOf) + ". Press Refresh to try again.</span>";
+}
+function copyText() {
+  const out = ["Parramatta Cheetahs milestone watch (" + fmtDate(asOf) + ")"];
+  for (const t of MILESTONES) {
+    const list = rows.filter(r => r.t === t && r.gap <= maxGap);
+    out.push("", "Approaching " + t + ":");
+    if (!list.length) out.push("  Nobody");
+    for (const r of list) out.push("  " + r.name + " (" + r.m + " played)");
+  }
+  return out.join("\n");
+}
+async function refresh() {
+  const btn = document.getElementById("refresh");
+  btn.disabled = true; btn.textContent = "Refreshing…"; setStatus("loading");
+  try {
+    players = await loadPlayers(fetchPage);
+    rows = computeRows(players);
+    asOf = new Date().toISOString();
+    setStatus("live");
+  } catch (e) {
+    setStatus("error");
+  } finally {
+    btn.disabled = false; btn.textContent = "Refresh";
+    renderSummary(); render();
+  }
+}
+document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => {
+  maxGap = Number(b.dataset.gap);
+  document.querySelectorAll(".seg button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  render();
+}));
+document.getElementById("copy").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  try { await navigator.clipboard.writeText(copyText()); btn.textContent = "Copied"; }
+  catch (err) { btn.textContent = "Copy not available"; }
+  setTimeout(() => { btn.textContent = "Copy list"; }, 2000);
+});
+document.getElementById("refresh").addEventListener("click", refresh);
+renderSummary(); render();
+refresh();
+</script>
+</body>
+</html>
