@@ -301,8 +301,9 @@ footer p { margin: 0; }
     </section>
     <footer>
       <p>The round is the most recent one in which every senior match, in every grade, has finished. A round still in progress is skipped until its last match is complete. Junior, girls and Sunday T20 teams are not included.</p>
-      <p>Every innings counts on its own and nothing is added up across innings or matches, so a two-day match gives two separate innings. A batter is judged on his best single innings, a bowler on his best single bowling innings and the wicketkeeper on the most keeper catches and stumpings in one innings. Run scorers who tie go to the player from the higher grade (Senior A, then A Reserve, then B01 downwards). A wicketkeeper tie goes to the one with the higher score. Wicket takers who tie go to the one who conceded fewer runs, and then the one who bowled fewer overs.</p>
+      <p>Every innings counts on its own and nothing is added up across innings or matches, so a two-day match gives two separate innings. A batter is judged on his best single innings, a bowler on his best single bowling innings and the wicketkeeper on the most keeper catches and stumpings in one innings. Run scorers who tie go to the player from the higher grade (A, then A Reserve, then B01 downwards). A wicketkeeper tie goes to the one with the higher score. Wicket takers who tie go to the one who conceded fewer runs, and then the one who bowled fewer overs.</p>
       <p>Each player fills one place only, picked in that order: batters first, then the wicketkeeper, then the bowlers. A player already picked is skipped for the next place, so the next best player comes in.</p>
+      <p>The captain, marked (C), is the player in the XII with the best contribution: 1 point per run, 20 per wicket and 10 per wicketkeeper dismissal, each from the player's best innings. A tie goes to the higher grade.</p>
     </footer>
   </div>
 </div>
@@ -486,6 +487,10 @@ function gradeRank(name) {
   if (m) return Number(m[1]);
   return 999;
 }
+/* Grade as shown on the page: "Senior B08" becomes "B08". */
+function shortGrade(g) { return String(g || "").replace(/^seniors?\s+/i, ""); }
+/* Contribution used to choose the captain: 1 per run, 20 per wicket and 10 per keeper dismissal, from the player's best innings. */
+function contribution(p) { return p.runs + 20 * p.wkts + 10 * (p.kc + p.st); }
 function oversToBalls(o) {
   const parts = String(o == null ? 0 : o).split(".");
   return (parseInt(parts[0], 10) || 0) * 6 + (parseInt((parts[1] || "0").charAt(0), 10) || 0);
@@ -522,7 +527,10 @@ function selectXII(players) {
   if (keeper) picked.add(keeper.id);
   const bowlers = players.filter(p => !picked.has(p.id) && p.wkts > 0)
     .sort((a, b) => b.wkts - a.wkts || a.conc - b.conc || a.balls - b.balls || byName(a, b)).slice(0, XII_BOWLERS);
-  return { batters, keeper, keeperBasis, bowlers };
+  /* Captain: the player in the XII with the best contribution; a tie goes to the higher grade, then the one with more wickets. */
+  const team = [...batters, keeper, ...bowlers].filter(Boolean);
+  const captain = team.sort((a, b) => contribution(b) - contribution(a) || a.rank - b.rank || b.wkts - a.wkts || byName(a, b))[0] || null;
+  return { batters, keeper, keeperBasis, bowlers, captain };
 }
 /* Find the club's last completed senior round and build the XII from it.
    A round is complete when none of its senior matches (in any grade) is still to be played or in progress.
@@ -705,7 +713,7 @@ function isShown(id) {
 }
 function teamText(id) {
   const a = activity.state === "ok" ? activity.map.get(id) : null;
-  return a && a.teams.length ? a.teams.join(", ") : "";
+  return a && a.teams.length ? a.teams.map(shortGrade).join(", ") : "";
 }
 function activityNote() {
   return activity.state === "error" ? "Could not check who is still playing, so players who have left may be listed." : "";
@@ -909,12 +917,12 @@ $("refresh").addEventListener("click", refresh);
 let xii = { state: "idle", data: null, at: null };
 const plural = (n, one, many) => n + " " + (n === 1 ? one : many);
 function gradeFor(kind, p) {
-  return (kind === "bat" ? p.batGrade : kind === "keep" ? p.keepGrade : p.bowlGrade) || p.grade;
+  return shortGrade((kind === "bat" ? p.batGrade : kind === "keep" ? p.keepGrade : p.bowlGrade) || p.grade);
 }
 function xiiFigure(kind, p) {
   if (kind === "bat") return plural(p.runs, "run", "runs");
   if (kind === "keep") return plural(p.kc, "catch", "catches") + ", " + plural(p.st, "stumping", "stumpings");
-  return p.wkts + " for " + p.conc + " off " + ballsToOvers(p.balls) + (p.balls === 6 ? " over" : " overs");
+  return p.wkts + " for " + p.conc;
 }
 function xiiRounds(r) {
   return fmtDay(r.first) + (r.last !== r.first ? " to " + fmtDay(r.last) : "");
@@ -962,7 +970,7 @@ function renderXII() {
         const li = document.createElement("li");
         const nm = document.createElement("span"); nm.className = "name";
         const num = document.createElement("span"); num.className = "xnum"; num.textContent = k;
-        nm.append(num, document.createTextNode(p.name));
+        nm.append(num, document.createTextNode(p.name + (x.captain && x.captain.id === p.id ? " (C)" : "")));
         const meta = document.createElement("span"); meta.className = "meta";
         const fig = document.createElement("span"); fig.textContent = xiiFigure(g.kind, p);
         const pill = document.createElement("span"); pill.className = "pill"; pill.textContent = gradeFor(g.kind, p);
@@ -983,9 +991,10 @@ function xiiText() {
   if (!d || !d.round) return "Parramatta Cheetahs Senior Club XII: no completed round yet.";
   const out = ["Parramatta Cheetahs Senior Club XII - " + d.round.name + " (" + xiiRounds(d.round) + ")", ""];
   let k = 0;
-  for (const p of d.xii.batters) out.push(++k + ". " + p.name + " (" + gradeFor("bat", p) + ") - " + xiiFigure("bat", p));
-  if (d.xii.keeper) out.push(++k + ". " + d.xii.keeper.name + " (" + gradeFor("keep", d.xii.keeper) + ") - wicketkeeper, " + xiiFigure("keep", d.xii.keeper));
-  for (const p of d.xii.bowlers) out.push(++k + ". " + p.name + " (" + gradeFor("bowl", p) + ") - " + xiiFigure("bowl", p));
+  const cap = p => p.name + (d.xii.captain && d.xii.captain.id === p.id ? " (C)" : "");
+  for (const p of d.xii.batters) out.push(++k + ". " + cap(p) + " (" + gradeFor("bat", p) + ") - " + xiiFigure("bat", p));
+  if (d.xii.keeper) out.push(++k + ". " + cap(d.xii.keeper) + " (" + gradeFor("keep", d.xii.keeper) + ") - wicketkeeper, " + xiiFigure("keep", d.xii.keeper));
+  for (const p of d.xii.bowlers) out.push(++k + ". " + cap(p) + " (" + gradeFor("bowl", p) + ") - " + xiiFigure("bowl", p));
   return out.join("\n");
 }
 let xiiRun = 0;
