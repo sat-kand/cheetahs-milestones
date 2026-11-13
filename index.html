@@ -169,6 +169,8 @@ li { display: flex; flex-direction: column; gap: 2px; }
 .side { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 16px; }
 .watch { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--gold); border-radius: 6px; padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 8px; }
 .watch .cap { margin: 0; color: var(--muted); font-size: 0.85rem; }
+.side > p { margin: 0; }
+#watch-note:empty { display: none; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 th { text-align: left; font-size: 0.8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 0; border-bottom: 2px solid var(--gold); }
 td { padding: 7px 0; border-bottom: 1px solid var(--line); }
@@ -242,6 +244,8 @@ footer p { margin: 0; }
 
   <aside class="side" aria-labelledby="h-watch">
     <h2 id="h-watch">Watchlist</h2>
+    <p class="blurb">Only players who have played for the club in the last 12 months.</p>
+    <p class="bad" id="watch-note"></p>
     <div class="watch">
       <h3>Matches</h3>
       <p class="cap">Within 3 matches of a milestone</p>
@@ -262,6 +266,7 @@ footer p { margin: 0; }
 
   <footer>
     <p>Match counts come from the batting statistics, so they follow the same numbers as the club page. "Next game" means the player has played one match fewer than the milestone.</p>
+    <p>Players with no Cheetahs match in the last 12 months are treated as having left and are left out of the watchlist and the matches section.</p>
     <p>Wickets and runs are career totals for Cheetahs matches across all seasons. A player counts as crossing a milestone when the wickets or runs in the period lift the total over it, so someone on 164 wickets only appears if they were below 150 before the period started. A two-day match counts on the day it finishes.</p>
   </footer>
 </div>
@@ -275,6 +280,7 @@ const SNAPSHOT = {"asOf":"2026-11-13T00:35:32Z","players":[{"n":"Soans, Gladson"
 /* LOGIC-START */
 const MILESTONES = [100, 150, 200, 250];
 const MATCH_WATCH_RANGE = 3; /* matches watchlist: 3 matches below a milestone or fewer (97, 98, 99 and so on) */
+const ACTIVE_DAYS = 365;     /* a player with no Cheetahs match in this many days is treated as dormant */
 
 /* Career statistics tracked for "crossed a milestone" and the watchlist.
    margin: only players up to this far above a milestone can have crossed it in a 4-week period.
@@ -301,7 +307,7 @@ function milestoneFor(m) {
   return null;
 }
 function computeRows(players) {
-  return players.map(p => ({ name: displayName(p.n), m: p.m, ...milestoneFor(p.m) }))
+  return players.map(p => ({ id: p.id, name: displayName(p.n), m: p.m, ...milestoneFor(p.m) }))
     .filter(r => r.t).sort((a, b) => a.t - b.t || a.gap - b.gap || a.name.localeCompare(b.name));
 }
 /* Pages overlap (step 50, size 100) so ties at a page edge cannot hide a player. Sorted by matches, highest first. */
@@ -310,7 +316,7 @@ async function loadPlayers(fetchPage) {
   for (let off = 1; off <= 2001; off += 50) {
     const rows = await fetchPage(off);
     if (!rows.length) break;
-    for (const p of rows) map.set(p.id, { n: p.name, m: p.statistics.matches });
+    for (const p of rows) map.set(p.id, { id: p.id, n: p.name, m: p.statistics.matches });
     const min = Math.min(...rows.map(r => r.statistics.matches));
     if (min < 90 || rows.length < 100) break;
   }
@@ -321,7 +327,7 @@ async function loadPlayers(fetchPage) {
 function watchlist(items, milestones, getName, getCount, range) {
   return items
     .filter(p => milestones.some(M => getCount(p) >= M - range && getCount(p) <= M - 1))
-    .map(p => ({ name: displayName(getName(p)), count: getCount(p) }))
+    .map(p => ({ id: p.id, name: displayName(getName(p)), count: getCount(p) }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
 
@@ -364,18 +370,46 @@ async function mapLimit(items, limit, fn) {
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
   return out;
 }
+/* Seasons overlap (a winter season starts while the summer one is running), so take the newest few by start date. */
+function newestSeasons(seasons, now, n) {
+  return seasons
+    .filter(s => s.startDate && parseDate(s.startDate) <= now)
+    .sort((a, b) => parseDate(b.startDate) - parseDate(a.startDate))
+    .slice(0, n);
+}
+async function teamIdsFor(api, seasons) {
+  const ids = new Set();
+  await Promise.all(seasons.map(async s => { for (const t of await api.getTeams(s.id)) ids.add(t.id); }));
+  return ids;
+}
+/* Who has played a Cheetahs match in the last ACTIVE_DAYS days? Returns Map(id -> true | false).
+   A player whose history could not be fetched is left out of the map, so the page keeps listing them. */
+async function findRecentlyActive(api, now, ids) {
+  const cutoff = addDays(ymdSydney(now), -ACTIVE_DAYS);
+  const seasons = newestSeasons(await api.getSeasons(), now, 4);
+  const teamIds = await teamIdsFor(api, seasons);
+  const result = new Map();
+  await mapLimit(ids, 6, async id => {
+    try {
+      for (const s of seasons) {
+        const perf = await api.getPerf(id, s.id);
+        const recent = (Array.isArray(perf) ? perf : []).some(m => (m.teams || []).some(t => teamIds.has(t.id)) && matchFinalDay(m) >= cutoff);
+        if (recent) { result.set(id, true); return; }
+      }
+      result.set(id, false);
+    } catch (e) { /* unknown */ }
+  });
+  return result;
+}
+
 /* api = { getBowlPage(offset), getBatPage(offset), getSeasons(), getTeams(seasonId), getPerf(playerId, seasonId) } */
 async function buildCrossData(api, now, cfg, onTotals) {
   const totals = await loadTotals(api[cfg.page], cfg);
   const watch = watchlist(totals, cfg.ms, p => p.n, p => p.v, cfg.range);
   if (onTotals) onTotals(watch);
   const cands = totals.filter(p => cfg.ms.some(M => p.v >= M && p.v <= M + cfg.margin));
-  const seasons = (await api.getSeasons())
-    .filter(s => s.startDate && parseDate(s.startDate) <= now)
-    .sort((a, b) => parseDate(b.startDate) - parseDate(a.startDate))
-    .slice(0, 2); /* the two newest seasons cover a month-long window even at a season boundary */
-  const teamIds = new Set();
-  await Promise.all(seasons.map(async s => { for (const t of await api.getTeams(s.id)) teamIds.add(t.id); }));
+  const seasons = newestSeasons(await api.getSeasons(), now, 2); /* two newest seasons cover a month-long window even at a season boundary */
+  const teamIds = await teamIdsFor(api, seasons);
   let failed = 0;
   const players = await mapLimit(cands, 6, async p => {
     const matches = new Map();
@@ -442,6 +476,7 @@ let players = SNAPSHOT.players;
 let rows = computeRows(players);
 let asOf = SNAPSHOT.asOf;
 let matchState = "loading";
+let activity = { state: "loading", map: new Map() }; /* who has played for the club in the last 12 months */
 
 /* One entry per "crossed a milestone" section. */
 const sections = [
@@ -461,6 +496,12 @@ function fmtDay(ymd) {
   const f = o => new Intl.DateTimeFormat("en-AU", Object.assign({ timeZone: "UTC" }, o)).format(d);
   return f({ weekday: "short" }) + " " + f({ day: "numeric" }) + " " + f({ month: "short" });
 }
+/* A player is shown unless the activity check found them dormant. Players it could not check stay listed. */
+function isShown(id) { return activity.state !== "ok" || activity.map.get(id) !== false; }
+function visibleRows() { return rows.filter(r => isShown(r.id)); }
+function activityNote() {
+  return activity.state === "error" ? "Could not check who is still playing, so players who have left may be listed." : "";
+}
 function names(list) {
   const n = list.map(r => r.name);
   if (n.length <= 1) return n.join("");
@@ -478,22 +519,27 @@ function periodLabel(sec) {
 
 /* ---- matches section ---- */
 function renderSummary() {
-  const exact = rows.filter(r => r.gap === 0);
+  const vis = visibleRows();
+  const exact = vis.filter(r => r.gap === 0);
   const el = $("summary");
+  if (activity.state === "loading") { el.textContent = "Checking who is still playing…"; return; }
   if (exact.length) {
     el.innerHTML = "<strong>" + exact.length + (exact.length === 1 ? " player is" : " players are") + " one game from a milestone:</strong> " + names(exact) + ".";
   } else {
-    const best = rows.length ? Math.min(...rows.map(x => x.gap)) : null;
-    const closest = best === null ? [] : rows.filter(r => r.gap === best);
+    const best = vis.length ? Math.min(...vis.map(x => x.gap)) : null;
+    const closest = best === null ? [] : vis.filter(r => r.gap === best);
     el.innerHTML = "<strong>Nobody is on 99, 149, 199 or 249 matches this week.</strong>" +
       (closest.length ? " Closest: " + names(closest) + " on " + closest[0].m + "." : "");
   }
+  if (activityNote()) el.innerHTML += '<span class="bad">' + activityNote() + "</span>";
 }
 function render() {
   const grid = $("grid");
   grid.innerHTML = "";
+  if (activity.state === "loading") return;
+  const vis = visibleRows();
   for (const t of MILESTONES) {
-    const list = rows.filter(r => r.t === t && r.gap <= maxGap);
+    const list = vis.filter(r => r.t === t && r.gap <= maxGap);
     const card = document.createElement("section");
     card.className = "card";
     card.setAttribute("aria-label", "Approaching " + t + " matches");
@@ -615,17 +661,23 @@ function watchTable(list, countLabel, emptyText) {
   return box;
 }
 function matchWatch() {
-  return watchlist(players, MILESTONES, p => p.n, p => p.m, MATCH_WATCH_RANGE);
+  return watchlist(players, MILESTONES, p => p.n, p => p.m, MATCH_WATCH_RANGE).filter(r => isShown(r.id));
+}
+function sectionWatch(sec) {
+  return sec.watch ? sec.watch.filter(r => isShown(r.id)) : null;
 }
 function renderWatch() {
   const m = $("watch-matches");
   m.innerHTML = "";
-  m.appendChild(watchTable(matchWatch(), "Matches", "Nobody within 3 matches of a milestone."));
+  if (activity.state === "loading") m.textContent = "Checking who is still playing…";
+  else m.appendChild(watchTable(matchWatch(), "Matches", "Nobody within 3 matches of a milestone."));
+  $("watch-note").textContent = activityNote();
   for (const sec of sections) {
     const el = $(sec.ids.watch);
     const label = sec.cfg.units.charAt(0).toUpperCase() + sec.cfg.units.slice(1);
     el.innerHTML = "";
-    if (sec.watch) el.appendChild(watchTable(sec.watch, label, "Nobody within " + sec.cfg.range + " " + sec.cfg.units + " of a milestone."));
+    if (activity.state === "loading" && sec.state !== "error") el.textContent = "Checking who is still playing…";
+    else if (sec.watch) el.appendChild(watchTable(sectionWatch(sec), label, "Nobody within " + sec.cfg.range + " " + sec.cfg.units + " of a milestone."));
     else if (sec.state === "error") {
       const p = document.createElement("p"); p.className = "bad"; p.textContent = "Could not load " + sec.cfg.units + ". Press Refresh to try again."; el.appendChild(p);
     } else el.textContent = "Checking " + sec.cfg.units + "…";
@@ -645,12 +697,14 @@ function copyText() {
   for (const r of mw) out.push("  " + r.name + " " + r.count);
   for (const sec of sections) {
     out.push("", "WATCHLIST: " + sec.cfg.units + " (within " + sec.cfg.range + " of a milestone)");
-    if (!sec.watch || !sec.watch.length) out.push("  " + (sec.watch ? "Nobody" : "Not loaded"));
-    else for (const r of sec.watch) out.push("  " + r.name + " " + fmtNum(r.count));
+    const sw = sectionWatch(sec);
+    if (!sw || !sw.length) out.push("  " + (sw ? "Nobody" : "Not loaded"));
+    else for (const r of sw) out.push("  " + r.name + " " + fmtNum(r.count));
   }
   out.push("", "MATCHES: next game is a milestone");
+  const vis = visibleRows();
   for (const t of MILESTONES) {
-    const list = rows.filter(r => r.t === t && r.gap <= maxGap);
+    const list = vis.filter(r => r.t === t && r.gap <= maxGap);
     out.push("", "Approaching " + t + ":");
     if (!list.length) out.push("  Nobody");
     for (const r of list) out.push("  " + r.name + " (" + r.m + " played)");
@@ -699,11 +753,23 @@ async function refreshSection(sec, api) {
     renderSection(sec); renderWatch();
   }
 }
+async function refreshActivity(api) {
+  const ids = new Set(rows.map(r => r.id));
+  for (const sec of sections) if (sec.watch) for (const r of sec.watch) ids.add(r.id);
+  ids.delete(undefined);
+  try {
+    activity = { state: "ok", map: await findRecentlyActive(api, new Date(), [...ids]) };
+  } catch (e) {
+    activity = { state: "error", map: new Map() };
+  }
+  renderSummary(); render(); renderWatch();
+}
 async function refresh() {
   const btn = $("refresh");
   btn.disabled = true; btn.textContent = "Refreshing…"; setStatus("loading");
   const api = makeApi();
   await Promise.all([refreshMatches(), ...sections.map(sec => refreshSection(sec, api))]);
+  await refreshActivity(api);
   btn.disabled = false; btn.textContent = "Refresh";
 }
 document.querySelectorAll("#seg-matches button").forEach(b => b.addEventListener("click", () => {
