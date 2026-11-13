@@ -806,12 +806,16 @@ function makeApi() {
     getSeasons: () => once("seasons", async () => (await getJSON("/fixturesladders/organisations/" + ORG + "/seasons?jsconfig=eccn%3Atrue")).seasons || []),
     getTeams: id => once("teams" + id, async () => (await getJSON("/fixturesladders/organisations/" + ORG + "/teams?seasonId=" + id + "&jsconfig=eccn%3Atrue")).teams || []),
     getTeamMatches: id => once("tm" + id, async () => (await getJSON("/scores/teams/" + id + "/matches?jsconfig=eccn%3Atrue")).matches || []),
+    /* Play Cricket now and then answers without the scorecard, or with an error, so try a few times with a short pause. */
     getScorecard: id => once("sc" + id, async () => {
       const urls = ["?responseModifier=includeScorecard", "?responseModifier=includeScorecard&jsconfig=eccn%3Atrue"];
       let last = null;
-      for (let i = 0; i < 4; i++) {
-        last = lowerKeys(await getJSON("/scores/matches/" + id + urls[i % 2] + (i > 1 ? "&r=" + i : "")));
-        if (Array.isArray(last.innings)) return last;
+      for (let i = 0; i < 6; i++) {
+        if (i) await new Promise(r => setTimeout(r, 400 * i));
+        try {
+          last = lowerKeys(await getJSON("/scores/matches/" + id + urls[i % 2] + (i > 1 ? "&r=" + Date.now() : "")));
+          if (Array.isArray(last.innings)) return last;
+        } catch (e) { /* try again */ }
       }
       return last;
     }),
