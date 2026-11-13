@@ -190,6 +190,12 @@ td.num { font-weight: 700; color: var(--heading); }
 .panel { display: flex; flex-direction: column; gap: 28px; }
 .xnum { display: inline-block; min-width: 1.6em; margin-right: 6px; padding: 0 4px; text-align: center; border-radius: 999px; background: var(--gold); color: var(--brand); font-size: 0.8rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .xii-grid { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.card.clean { border-top-color: var(--line); }
+.card .vs { color: var(--muted); font-size: 0.88rem; margin: -6px 0 0; }
+.issue { font-size: 0.92rem; }
+.issue .tag { display: inline-block; margin-right: 6px; padding: 0 7px; border-radius: 999px; background: var(--pill-bg); color: var(--pill-ink); font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+.tabs { overflow-x: auto; }
+.tab { white-space: nowrap; }
 @media (max-width: 860px) {
   .layout { grid-template-columns: minmax(0, 1fr); }
   .side { position: static; order: -1; }
@@ -214,6 +220,7 @@ td.num { font-weight: 700; color: var(--heading); }
   <div class="tabs" role="tablist" aria-label="Pages">
     <button type="button" class="tab" role="tab" id="tab-milestones" data-tab="milestones" aria-controls="panel-milestones" aria-selected="true">Milestones</button>
     <button type="button" class="tab" role="tab" id="tab-xii" data-tab="xii" aria-controls="panel-xii" aria-selected="false">Club XII</button>
+    <button type="button" class="tab" role="tab" id="tab-audit" data-tab="audit" aria-controls="panel-audit" aria-selected="false">Scorecard Audit</button>
   </div>
 
   <div class="panel" id="panel-milestones" role="tabpanel" aria-labelledby="tab-milestones">
@@ -294,6 +301,17 @@ td.num { font-weight: 700; color: var(--heading); }
       <div class="grid xii-grid" id="x-grid"></div>
     </section>
     </div>
+  <div class="panel" id="panel-audit" role="tabpanel" aria-labelledby="tab-audit" hidden>
+    <div class="toolbar">
+      <div class="actions"><button type="button" class="refresh" id="a-refresh">Refresh</button><button type="button" class="copy" id="a-copy">Copy issues</button></div>
+    </div>
+    <section class="block" aria-labelledby="h-audit">
+      <h2 id="h-audit">Scorecard audit</h2>
+      <p class="blurb">Checks each senior team's scorecard for the club's last completed round: batting and bowling totals add up, every catch, stumping and run out is credited to a fielder, and no player's name is hidden.</p>
+      <div class="summary" id="a-summary">Loading the last completed round…</div>
+      <div class="grid xii-grid" id="a-grid"></div>
+    </section>
+  </div>
 </div>
 
 <script>
@@ -523,7 +541,7 @@ function selectXII(players) {
 /* Find the club's last completed senior round and build the XII from it.
    A round is complete when none of its senior matches (in any grade) is still to be played or in progress.
    api adds getTeamMatches(teamId) -> the team's fixtures with round, status and schedule. */
-async function buildClubXII(api, now) {
+async function findLastRound(api, now) {
   const seasons = newestSeasons(await api.getSeasons(), now, 2);
   const teamIds = await teamIdsFor(api, seasons);
   const today = ymdSydney(now);
@@ -549,8 +567,11 @@ async function buildClubXII(api, now) {
     .map(r => ({ ...r, first: [...r.matches.values()].map(m => m.first).filter(Boolean).sort()[0] || "", last: [...r.matches.values()].map(m => m.last).filter(Boolean).sort().pop() || "" }))
     .filter(r => r.last && r.last <= today)
     .sort((a, b) => b.last.localeCompare(a.last));
-  if (failedTeams) return { round: null, failedTeams };
-  const round = done[0];
+  if (failedTeams || !done.length) return { round: null, failedTeams, teamIds };
+  return { round: done[0], failedTeams, teamIds };
+}
+async function buildClubXII(api, now) {
+  const { round, failedTeams, teamIds } = await findLastRound(api, now);
   if (!round) return { round: null, failedTeams };
 
   /* Everyone in a club squad for those matches */
@@ -600,6 +621,122 @@ async function buildClubXII(api, now) {
   });
   return { round: { name: round.name, season: round.season, first: round.first, last: round.last, matches: round.matches.size },
            players, failed, failedTeams, xii: selectXII(players) };
+}
+
+/* ---- Scorecard audit ---- */
+/* Play Cricket answers with either "Innings" or "innings" style keys, so make every key start lower case. */
+function lowerKeys(o) {
+  if (Array.isArray(o)) return o.map(lowerKeys);
+  if (o && typeof o === "object") {
+    const out = {};
+    for (const k of Object.keys(o)) out[k.charAt(0).toLowerCase() + k.slice(1)] = lowerKeys(o[k]);
+    return out;
+  }
+  return o;
+}
+/* A name the scorecard hides (a player set to private shows as asterisks or a placeholder). */
+function isHiddenName(n) {
+  const s = String(n == null ? "" : n).trim();
+  return !s || /\*/.test(s) || /^(private|hidden|unknown|anonymous)\b/i.test(s) || /\b(private|hidden) (player|participant)\b/i.test(s);
+}
+const ordinal = n => n + (n === 1 ? "st" : n === 2 ? "nd" : n === 3 ? "rd" : "th");
+/* Checks for one club team in one match. sc = scorecard with lower-case keys; clubTeamId = our team in it.
+   Returns [{ type: "batting" | "bowling" | "fielding" | "names", text }]. */
+function auditTeam(sc, clubTeamId) {
+  const issues = [];
+  const add = (type, text) => issues.push({ type, text });
+  const num = v => Number(v) || 0;
+  const us = (sc.teams || []).find(t => t.id === clubTeamId) || { players: [] };
+  const ourIds = new Set((us.players || []).map(p => p.participantId));
+
+  for (const p of (us.players || [])) {
+    if (isHiddenName(p.name)) add("names", "A player in the team list has a hidden name (shown as \"" + (String(p.name || "").trim() || "blank") + "\").");
+  }
+  for (const inn of (sc.innings || [])) {
+    const batting = inn.batting || [], bowling = inn.bowling || [], fielding = inn.fielding || [];
+    const total = num(inn.runsScored);
+    const played = total > 0 || num(inn.numberOfWicketsFallen) > 0 || batting.some(b => num(b.ballsFaced) > 0 || num(b.runsScored) > 0) || bowling.some(b => num(b.oversBowled) > 0);
+    if (!played) continue; /* an innings that never started */
+    const label = ordinal(num(inn.inningsNumber) || 1) + " innings";
+    const b = num(inn.byesRuns), lb = num(inn.legByesRuns), w = num(inn.wideBalls), nb = num(inn.noBalls), pen = num(inn.penalties);
+    if (inn.battingTeamId === clubTeamId) {
+      /* our batting */
+      const bat = batting.reduce((a, x) => a + num(x.runsScored), 0);
+      const sum = bat + b + lb + w + nb + pen;
+      if (sum !== total) {
+        add("batting", "Our " + label + ": batters' runs " + bat + " + byes " + b + " + leg byes " + lb + " + wides " + w + " + no balls " + nb + " + penalties " + pen +
+          " = " + sum + ", but the innings total is " + total + " (" + Math.abs(total - sum) + (sum < total ? " missing" : " too many") + ").");
+      }
+      for (const x of batting) if (isHiddenName(x.playerShortName)) add("names", "Our " + label + ": a batter's name is hidden (shown as \"" + (String(x.playerShortName || "").trim() || "blank") + "\").");
+    } else {
+      /* opponents batting: our bowling and fielding */
+      const conceded = bowling.reduce((a, x) => a + num(x.runsConceded), 0);
+      const sum = conceded + b + lb + pen;
+      if (sum !== total) {
+        add("bowling", "Opponents' " + label + ": our bowlers' runs " + conceded + " + byes " + b + " + leg byes " + lb + " + penalties " + pen +
+          " = " + sum + ", but the innings total is " + total + " (" + Math.abs(total - sum) + (sum < total ? " missing" : " too many") + ").");
+      }
+      for (const x of bowling) if (isHiddenName(x.playerShortName)) add("names", "Opponents' " + label + ": a bowler's name is hidden (shown as \"" + (String(x.playerShortName || "").trim() || "blank") + "\").");
+      let caught = 0, stumped = 0, runOut = 0;
+      for (const x of batting) {
+        const type = String(x.dismissalType || ""), text = String(x.dismissalText || "");
+        const who = x.playerShortName || "a batter";
+        if (/caught/i.test(type)) {
+          caught++;
+          const m = text.match(/^c\s*&\s*b:\s*(.*)$/i) || text.match(/^c:\s*(.*?)\s*b:/i);
+          if (m && !m[1].trim()) add("fielding", "Opponents' " + label + ": " + who + " was caught but no catcher is recorded (\"" + text.trim() + "\").");
+        } else if (/stump/i.test(type)) {
+          stumped++;
+          const m = text.match(/^st:\s*(.*?)\s*b:/i);
+          if (m && !m[1].trim()) add("fielding", "Opponents' " + label + ": " + who + " was stumped but no wicketkeeper is recorded (\"" + text.trim() + "\").");
+        } else if (/run out/i.test(type)) {
+          runOut++;
+          const m = text.match(/\(([^)]*)\)/);
+          if (!m || !m[1].trim()) add("fielding", "Opponents' " + label + ": " + who + " was run out but no fielder is recorded.");
+        }
+      }
+      const mine = fielding.filter(f => !ourIds.size || ourIds.has(f.participantId));
+      const cc = mine.reduce((a, f) => a + num(f.totalCatches != null ? f.totalCatches : num(f.catches) + num(f.wicketKeeperCatches)), 0);
+      const cs = mine.reduce((a, f) => a + num(f.stumpings), 0);
+      const cr = mine.reduce((a, f) => a + num(f.runOuts), 0);
+      const withRO = mine.filter(f => num(f.runOuts) > 0).length;
+      if (cc !== caught) add("fielding", "Opponents' " + label + ": " + caught + " caught in the scorecard, but " + cc + (cc === 1 ? " catch is" : " catches are") + " credited to our fielders.");
+      if (cs !== stumped) add("fielding", "Opponents' " + label + ": " + stumped + " stumped in the scorecard, but " + cs + (cs === 1 ? " stumping is" : " stumpings are") + " credited to our players.");
+      /* an assisted run out credits two fielders, so more credits than run outs is normal */
+      if (cr < runOut || (runOut === 0 && withRO > 0)) add("fielding", "Opponents' " + label + ": " + runOut + " run out in the scorecard, but " + cr + (cr === 1 ? " run out is" : " run outs are") + " credited to our fielders.");
+      for (const f of mine) if (isHiddenName(f.playerShortName)) add("names", "Opponents' " + label + ": a fielder's name is hidden (shown as \"" + (String(f.playerShortName || "").trim() || "blank") + "\").");
+    }
+  }
+  return issues;
+}
+/* Audit every senior team's scorecard for the last completed round. api adds getScorecard(matchId). */
+async function buildAudit(api, now) {
+  const { round, failedTeams, teamIds } = await findLastRound(api, now);
+  if (!round) return { round: null, failedTeams };
+  const teams = [];
+  await mapLimit([...round.matches.keys()], 4, async id => {
+    let sc = null;
+    try { sc = await api.getScorecard(id); } catch (e) { sc = null; }
+    if (!sc || !Array.isArray(sc.innings)) {
+      /* still say which team it is, from the plain match detail */
+      let label = { grade: "", name: "Match", opponent: "" };
+      try {
+        const d = lowerKeys(await api.getMatch(id));
+        const us = (d.teams || []).find(t => teamIds.has(t.id)), them = (d.teams || []).find(t => !teamIds.has(t.id));
+        if (us) label = { grade: teamIds.get(us.id), name: us.displayName || us.name, opponent: them ? them.displayName || them.name : "" };
+      } catch (e) { /* keep the generic label */ }
+      teams.push({ matchId: id, ...label, rank: gradeRank(label.grade), loaded: false, issues: [] });
+      return;
+    }
+    for (const t of (sc.teams || [])) {
+      if (!teamIds.has(t.id)) continue;
+      const them = (sc.teams || []).find(x => x.id !== t.id);
+      const grade = teamIds.get(t.id);
+      teams.push({ matchId: id, grade, name: t.displayName || t.name, opponent: them ? them.displayName || them.name : "", rank: gradeRank(grade), loaded: true, issues: auditTeam(sc, t.id) });
+    }
+  });
+  teams.sort((a, b) => a.rank - b.rank || String(a.name).localeCompare(String(b.name)));
+  return { round: { name: round.name, season: round.season, first: round.first, last: round.last, matches: round.matches.size }, teams, failedTeams };
 }
 
 /* api = { getMatchesPage(offset), getBowlPage(offset), getBatPage(offset), getSeasons(), getTeams(seasonId), getPerf(playerId, seasonId), getMatch(matchId) } */
@@ -667,6 +804,15 @@ function makeApi() {
     getSeasons: () => once("seasons", async () => (await getJSON("/fixturesladders/organisations/" + ORG + "/seasons?jsconfig=eccn%3Atrue")).seasons || []),
     getTeams: id => once("teams" + id, async () => (await getJSON("/fixturesladders/organisations/" + ORG + "/teams?seasonId=" + id + "&jsconfig=eccn%3Atrue")).teams || []),
     getTeamMatches: id => once("tm" + id, async () => (await getJSON("/scores/teams/" + id + "/matches?jsconfig=eccn%3Atrue")).matches || []),
+    getScorecard: id => once("sc" + id, async () => {
+      const urls = ["?responseModifier=includeScorecard", "?responseModifier=includeScorecard&jsconfig=eccn%3Atrue"];
+      let last = null;
+      for (let i = 0; i < 4; i++) {
+        last = lowerKeys(await getJSON("/scores/matches/" + id + urls[i % 2] + (i > 1 ? "&r=" + i : "")));
+        if (Array.isArray(last.innings)) return last;
+      }
+      return last;
+    }),
     getMatch: id => once("match" + id, () => getJSON("/scores/matches/" + id)),
     getPerf: (pid, sid) => once("perf" + pid + sid, () => getJSON("/scores/players/" + pid + "/match-performances?seasonId=" + sid + "&matchTypeId=&ageGroupCategoryId=&jsconfig=eccn%3Atrue"))
   };
@@ -1010,14 +1156,109 @@ $("x-copy").addEventListener("click", async e => {
   setTimeout(() => { btn.textContent = "Copy XII"; }, 2000);
 });
 
-/* ---- tabs: Club XII is refreshed every time it is opened ---- */
+
+/* ---- Scorecard audit tab ---- */
+let audit = { state: "idle", data: null, at: null };
+const ISSUE_ORDER = ["batting", "bowling", "fielding", "names"];
+const ISSUE_LABEL = { batting: "Batting", bowling: "Bowling", fielding: "Fielding", names: "Names" };
+function sortedIssues(t) { return [...t.issues].sort((a, b) => ISSUE_ORDER.indexOf(a.type) - ISSUE_ORDER.indexOf(b.type)); }
+function renderAudit() {
+  const sum = $("a-summary"), grid = $("a-grid");
+  grid.innerHTML = "";
+  if (audit.state === "loading" && !audit.data) { sum.textContent = "Loading the last completed round…"; return; }
+  if (audit.state === "error" && !audit.data) {
+    sum.innerHTML = '<span class="bad" style="margin:0">Could not load the round from Play Cricket. Press Refresh to try again.</span>';
+    return;
+  }
+  const d = audit.data;
+  if (!d.round) {
+    sum.innerHTML = d.failedTeams
+      ? '<span class="bad" style="margin:0">Could not read the fixtures for ' + plural(d.failedTeams, "team", "teams") + ", so the last completed round cannot be worked out. Press Refresh to try again.</span>"
+      : "<strong>No senior round has been completed yet.</strong>";
+    return;
+  }
+  const bad = d.teams.filter(t => t.issues.length), total = d.teams.reduce((a, t) => a + t.issues.length, 0), unread = d.teams.filter(t => !t.loaded);
+  sum.innerHTML = "<strong>" + d.round.name + "</strong> (" + xiiRounds(d.round) + "): " +
+    (total ? "<strong>" + plural(total, "issue", "issues") + " to fix</strong> in " + bad.length + " of " + plural(d.teams.length, "team", "teams") + "."
+           : "no issues found in " + plural(d.teams.length, "team", "teams") + ".");
+  if (unread.length) sum.innerHTML += '<span class="bad">Could not read the scorecard for ' + plural(unread.length, "team", "teams") + ". Press Refresh to try again.</span>";
+  if (audit.state === "error") sum.innerHTML += '<span class="bad">Could not refresh, so this is from ' + fmtDate(audit.at) + ". Press Refresh to try again.</span>";
+  for (const t of d.teams) {
+    const card = document.createElement("section");
+    card.className = "card" + (t.issues.length || !t.loaded ? "" : " clean");
+    card.setAttribute("aria-label", shortGrade(t.grade));
+    const head = document.createElement("div");
+    head.className = "card-head";
+    const big = document.createElement("span"); big.className = "big"; big.style.fontSize = "1.8rem"; big.textContent = shortGrade(t.grade) || t.name;
+    const lab = document.createElement("span"); lab.className = "label";
+    lab.textContent = !t.loaded ? "Not checked" : t.issues.length ? plural(t.issues.length, "issue", "issues") : "No issues";
+    head.append(big, lab);
+    const vs = document.createElement("p"); vs.className = "vs"; vs.textContent = t.name + (t.opponent ? " v " + t.opponent : "");
+    card.append(head, vs);
+    if (!t.loaded) {
+      const p = document.createElement("p"); p.className = "bad"; p.style.margin = "0"; p.textContent = "Play Cricket did not return this scorecard."; card.appendChild(p);
+    } else if (!t.issues.length) {
+      const p = document.createElement("p"); p.className = "empty"; p.textContent = "Totals add up, dismissals are credited and no names are hidden."; card.appendChild(p);
+    } else {
+      const ul = document.createElement("ul");
+      for (const it of sortedIssues(t)) {
+        const li = document.createElement("li"); li.className = "issue";
+        const span = document.createElement("span");
+        const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = ISSUE_LABEL[it.type];
+        span.append(tag, document.createTextNode(it.text));
+        li.appendChild(span);
+        ul.appendChild(li);
+      }
+      card.appendChild(ul);
+    }
+    grid.appendChild(card);
+  }
+}
+function auditText() {
+  const d = audit.data;
+  if (!d || !d.round) return "Parramatta Cheetahs scorecard audit: no completed round yet.";
+  const out = ["Parramatta Cheetahs scorecard audit - " + d.round.name + " (" + xiiRounds(d.round) + ")"];
+  for (const t of d.teams) {
+    out.push("", shortGrade(t.grade) + " - " + t.name + (t.opponent ? " v " + t.opponent : ""));
+    if (!t.loaded) out.push("  Scorecard could not be read");
+    else if (!t.issues.length) out.push("  No issues");
+    else for (const it of sortedIssues(t)) out.push("  - [" + ISSUE_LABEL[it.type] + "] " + it.text);
+  }
+  return out.join("\n");
+}
+let auditRun = 0;
+async function loadAudit() {
+  const run = ++auditRun;
+  const btn = $("a-refresh");
+  btn.disabled = true; btn.textContent = "Refreshing…";
+  audit.state = "loading"; renderAudit();
+  try {
+    const data = await buildAudit(makeApi(), new Date());
+    if (run !== auditRun) return;
+    audit = { state: "ok", data, at: new Date().toISOString() };
+  } catch (e) {
+    if (run !== auditRun) return;
+    audit.state = "error";
+  } finally {
+    if (run === auditRun) { renderAudit(); btn.disabled = false; btn.textContent = "Refresh"; }
+  }
+}
+$("a-refresh").addEventListener("click", loadAudit);
+$("a-copy").addEventListener("click", async e => {
+  const btn = e.currentTarget;
+  try { await navigator.clipboard.writeText(auditText()); btn.textContent = "Copied"; }
+  catch (err) { btn.textContent = "Copy not available"; }
+  setTimeout(() => { btn.textContent = "Copy issues"; }, 2000);
+});
+
+/* ---- tabs: Club XII and the audit are refreshed every time they are opened ---- */
 let milestonesLoaded = false;
 function showTab(name, updateHash) {
   for (const t of document.querySelectorAll(".tab")) t.setAttribute("aria-selected", String(t.dataset.tab === name));
-  $("panel-milestones").hidden = name !== "milestones";
-  $("panel-xii").hidden = name !== "xii";
-  if (updateHash) history.replaceState(null, "", name === "xii" ? "#club-xii" : location.pathname + location.search);
+  for (const n of ["milestones", "xii", "audit"]) $("panel-" + n).hidden = name !== n;
+  if (updateHash) history.replaceState(null, "", name === "xii" ? "#club-xii" : name === "audit" ? "#audit" : location.pathname + location.search);
   if (name === "xii") loadXII();
+  else if (name === "audit") loadAudit();
   else if (!milestonesLoaded) { milestonesLoaded = true; refresh(); }
 }
 document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => showTab(t.dataset.tab, true)));
@@ -1028,7 +1269,7 @@ document.querySelector(".tabs").addEventListener("keydown", e => {
   next.focus(); showTab(next.dataset.tab, true);
 });
 sections.forEach(renderSection); renderWatch();
-showTab(location.hash === "#club-xii" ? "xii" : "milestones", false);
+showTab(location.hash === "#club-xii" ? "xii" : location.hash === "#audit" ? "audit" : "milestones", false);
 </script>
 </body>
 </html>
