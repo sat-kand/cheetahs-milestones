@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-/* Layout idea: one summary line on top, four milestone columns beneath, each a plain list of names. */
+/* Layout idea: page title and actions, then two plain sections (matches, wickets), each a summary line over milestone cards. */
 :root {
   --bg: #f3f6f5;
   --surface: #ffffff;
@@ -17,6 +17,7 @@
   --accent: #1d5c4a;
   --accent-ink: #ffffff;
   --accent-soft: #dcece6;
+  --bad: #b3261e;
   --font-display: "Barlow Condensed", "Arial Narrow", Arial, sans-serif;
   --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
   color-scheme: light;
@@ -31,6 +32,7 @@
     --accent: #5fc4a2;
     --accent-ink: #08201a;
     --accent-soft: #1e3a31;
+    --bad: #ff9b94;
     color-scheme: dark;
   }
 }
@@ -43,6 +45,7 @@
   --accent: #5fc4a2;
   --accent-ink: #08201a;
   --accent-soft: #1e3a31;
+  --bad: #ff9b94;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -54,7 +57,7 @@ body {
   font-size: 16px;
   line-height: 1.45;
 }
-.wrap { max-width: 1040px; margin: 0 auto; padding: 28px 16px 48px; display: flex; flex-direction: column; gap: 24px; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 28px 16px 48px; display: flex; flex-direction: column; gap: 28px; }
 header { display: flex; flex-direction: column; gap: 4px; }
 h1 {
   margin: 0;
@@ -65,8 +68,22 @@ h1 {
   text-transform: uppercase;
   text-wrap: balance;
 }
+h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.5rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  text-wrap: balance;
+}
 .sub { margin: 0; color: var(--muted); font-size: 0.95rem; }
 .sub a { color: var(--accent); }
+.bad { color: var(--bad); font-weight: 500; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.actions { display: flex; gap: 8px; }
+.block { display: flex; flex-direction: column; gap: 14px; }
+.blurb { margin: 0; color: var(--muted); font-size: 0.95rem; }
 .summary {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -77,8 +94,8 @@ h1 {
   text-wrap: balance;
 }
 .summary strong { font-weight: 600; }
-.controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
-.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--surface); }
+.summary .bad { display: block; margin-top: 6px; font-size: 0.95rem; }
+.seg { display: inline-flex; flex-wrap: wrap; align-self: flex-start; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--surface); }
 .seg button {
   font: inherit; font-size: 0.92rem; font-weight: 500;
   padding: 8px 14px; border: 0; background: transparent; color: var(--ink); cursor: pointer;
@@ -92,7 +109,6 @@ h1 {
   background: var(--surface); color: var(--ink); cursor: pointer;
 }
 .copy:hover { background: var(--accent-soft); }
-.actions { display: flex; gap: 8px; }
 .refresh {
   font: inherit; font-size: 0.92rem; font-weight: 600;
   padding: 8px 16px; border: 1px solid var(--accent); border-radius: 6px;
@@ -100,11 +116,8 @@ h1 {
 }
 .refresh:hover:not(:disabled) { filter: brightness(1.08); }
 .refresh:disabled { opacity: 0.65; cursor: progress; }
-.sub .bad { color: #b3261e; font-weight: 500; }
-:root[data-theme="dark"] .sub .bad { color: #ff9b94; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .sub .bad { color: #ff9b94; } }
 button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
 .big { font-family: var(--font-display); font-weight: 700; font-size: 2.6rem; line-height: 1; color: var(--accent); font-variant-numeric: tabular-nums; }
@@ -116,7 +129,8 @@ li { display: flex; flex-direction: column; gap: 2px; }
 .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .pill.now { background: var(--accent); color: var(--accent-ink); }
 .empty { color: var(--muted); font-size: 0.95rem; margin: 0; }
-footer { color: var(--muted); font-size: 0.85rem; }
+footer { color: var(--muted); font-size: 0.85rem; display: flex; flex-direction: column; gap: 6px; }
+footer p { margin: 0; }
 @media (max-width: 420px) { h1 { font-size: 1.8rem; } .big { font-size: 2.2rem; } }
 @media (prefers-reduced-motion: no-preference) { .seg button, .copy { transition: background 0.12s; } }
 </style>
@@ -125,32 +139,53 @@ footer { color: var(--muted); font-size: 0.85rem; }
 <div class="wrap">
   <header>
     <h1>Cheetahs Milestone Watch</h1>
-    <p class="sub">Parramatta Cheetahs Cricket Club, all seasons, all teams. <span id="status">Loading the latest data…</span> Source: <a href="https://play.cricket.com.au/stats?cat=battingAvgs&amp;orgId=4059f1b9-86d8-eb11-a7ad-2818780da0cc">Play Cricket batting averages</a>.</p>
+    <p class="sub">Parramatta Cheetahs Cricket Club, all seasons, all teams. <span id="status">Loading the latest data…</span> Source: <a href="https://play.cricket.com.au/stats?cat=battingAvgs&amp;orgId=4059f1b9-86d8-eb11-a7ad-2818780da0cc">Play Cricket club statistics</a>.</p>
   </header>
 
-  <div class="summary" id="summary"></div>
+  <div class="toolbar">
+    <div class="actions"><button type="button" class="refresh" id="refresh">Refresh</button><button type="button" class="copy" id="copy">Copy list</button></div>
+  </div>
 
-  <div class="controls">
-    <div class="seg" role="group" aria-label="How close to a milestone">
+  <section class="block" aria-labelledby="h-matches">
+    <h2 id="h-matches">Matches</h2>
+    <p class="blurb">Players whose next game is their 100th, 150th, 200th or 250th.</p>
+    <div class="summary" id="summary"></div>
+    <div class="seg" id="seg-matches" role="group" aria-label="How close to a matches milestone">
       <button type="button" data-gap="0" aria-pressed="true">On 99, 149, 199, 249</button>
       <button type="button" data-gap="2" aria-pressed="false">Within 2 games</button>
       <button type="button" data-gap="5" aria-pressed="false">Within 5 games</button>
     </div>
-    <div class="actions"><button type="button" class="refresh" id="refresh">Refresh</button><button type="button" class="copy" id="copy">Copy list</button></div>
-  </div>
+    <div class="grid" id="grid"></div>
+  </section>
 
-  <div class="grid" id="grid"></div>
+  <section class="block" aria-labelledby="h-wickets">
+    <h2 id="h-wickets">Wickets</h2>
+    <p class="blurb">Players whose career wickets went from below a milestone to 100, 150, 200, 250 or 300 or more during the period.</p>
+    <div class="summary" id="w-summary">Checking wickets…</div>
+    <div class="seg" id="seg-wickets" role="group" aria-label="Period for wickets milestones">
+      <button type="button" data-days="7" aria-pressed="true">Last 7 days</button>
+      <button type="button" data-days="14" aria-pressed="false">Last 14 days</button>
+      <button type="button" data-days="28" aria-pressed="false">Last 4 weeks</button>
+    </div>
+    <div class="grid" id="w-grid"></div>
+  </section>
 
-  <footer>Match counts come from the batting statistics, so they follow the same numbers as the club page. "Next game" means the player has played one match fewer than the milestone.</footer>
+  <footer>
+    <p>Match counts come from the batting statistics, so they follow the same numbers as the club page. "Next game" means the player has played one match fewer than the milestone.</p>
+    <p>Wickets are career totals for Cheetahs matches across all seasons. A player counts as crossing a milestone when the wickets taken in the period lift the total over it, so someone on 164 only appears if they were below 150 before the period started. A two-day match counts on the day it finishes.</p>
+  </footer>
 </div>
 
 <script>
-const API = "https://grassrootsapiproxy.cricket.com.au/participants/organisations/4059f1b9-86d8-eb11-a7ad-2818780da0cc/batting-statistics";
-/* Saved copy shown until the live data arrives, and kept if Play Cricket cannot be reached. */
+const API_BASE = "https://grassrootsapiproxy.cricket.com.au";
+const ORG = "4059f1b9-86d8-eb11-a7ad-2818780da0cc";
+/* Saved copy of the matches list, shown until the live data arrives and kept if Play Cricket cannot be reached. */
 const SNAPSHOT = {"asOf":"2026-11-13T00:35:32Z","players":[{"n":"Soans, Gladson","m":98},{"n":"Vivekanandan, Pragadeeswaran","m":98},{"n":"Henry, Richard Derrick","m":96},{"n":"Mohan, Karthik","m":96},{"n":"Perumal, Rameshraja","m":96},{"n":"Krishnakumar, Prasanna","m":95},{"n":"Seetharaman, Shankar Ram","m":95}]};
 
 /* LOGIC-START */
 const MILESTONES = [100, 150, 200, 250];
+const W_MILESTONES = [100, 150, 200, 250, 300];
+const W_MARGIN = 40; /* only players within 40 wickets above a milestone can have crossed it in a 4-week period */
 
 function displayName(n) {
   const i = n.indexOf(",");
@@ -176,31 +211,141 @@ async function loadPlayers(fetchPage) {
   }
   return [...map.values()];
 }
+
+/* ---- wickets ---- */
+function parseDate(s) { return new Date(String(s).replace(/(\.\d{3})\d+/, "$1")); }
+function ymdSydney(d) {
+  const parts = new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(d);
+  const g = t => parts.find(x => x.type === t).value;
+  return g("year") + "-" + g("month") + "-" + g("day");
+}
+function addDays(ymd, n) {
+  const d = new Date(ymd + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+/* A match counts on the day it finishes (the last scheduled day), in Sydney time. */
+function matchFinalDay(m) {
+  const days = (m.matchSchedule || []).map(x => x.startDateTime).filter(Boolean);
+  const stamps = (days.length ? days : [m.startDateTime]).map(x => +parseDate(x)).filter(x => !isNaN(x));
+  return ymdSydney(new Date(Math.max(...stamps)));
+}
+function wicketsIn(m) {
+  return (m.bowlingStatistics || []).reduce((a, b) => a + (b.wicketsTaken || 0), 0);
+}
+/* Career wickets, highest first. Pages overlap so ties at a page edge cannot hide a player. */
+async function loadBowlers(getBowlPage) {
+  const map = new Map();
+  for (let off = 1; off <= 2001; off += 50) {
+    const rows = await getBowlPage(off);
+    if (!rows.length) break;
+    for (const p of rows) map.set(p.id, { id: p.id, n: p.name, w: p.statistics.bowlingWickets });
+    const min = Math.min(...rows.map(r => r.statistics.bowlingWickets));
+    if (min < W_MILESTONES[0] || rows.length < 100) break;
+  }
+  return [...map.values()];
+}
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) { const i = next++; out[i] = await fn(items[i], i); }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+/* api = { getBowlPage(offset), getSeasons(), getTeams(seasonId), getPerf(playerId, seasonId) } */
+async function buildWicketData(api, now) {
+  const bowlers = await loadBowlers(api.getBowlPage);
+  const cands = bowlers.filter(p => W_MILESTONES.some(M => p.w >= M && p.w <= M + W_MARGIN));
+  const seasons = (await api.getSeasons())
+    .filter(s => s.startDate && parseDate(s.startDate) <= now)
+    .sort((a, b) => parseDate(b.startDate) - parseDate(a.startDate))
+    .slice(0, 2); /* the two newest seasons cover a month-long window even at a season boundary */
+  const teamIds = new Set();
+  await Promise.all(seasons.map(async s => { for (const t of await api.getTeams(s.id)) teamIds.add(t.id); }));
+  let failed = 0;
+  const players = await mapLimit(cands, 6, async p => {
+    const matches = new Map();
+    for (const s of seasons) {
+      try {
+        const perf = await api.getPerf(p.id, s.id);
+        for (const m of (Array.isArray(perf) ? perf : [])) {
+          if ((m.teams || []).some(t => teamIds.has(t.id))) matches.set(m.id, { d: matchFinalDay(m), w: wicketsIn(m) });
+        }
+      } catch (e) { failed++; break; }
+    }
+    return { id: p.id, n: p.n, w: p.w, matches: [...matches.values()] };
+  });
+  return { players, failed, asOf: now.toISOString() };
+}
+function windowFor(days, now) {
+  const end = ymdSydney(now);
+  return { start: addDays(end, -(days - 1)), end };
+}
+function crossings(data, win) {
+  const out = [];
+  for (const p of data.players) {
+    const took = p.matches.filter(m => m.d >= win.start && m.d <= win.end).reduce((a, m) => a + m.w, 0);
+    const before = p.w - took;
+    for (const M of W_MILESTONES) if (before < M && M <= p.w) out.push({ M, name: displayName(p.n), before, now: p.w, took });
+  }
+  return out.sort((a, b) => a.M - b.M || b.took - a.took || a.name.localeCompare(b.name));
+}
 /* LOGIC-END */
 
+async function getJSON(path) {
+  const r = await fetch(API_BASE + path);
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  const t = await r.text();
+  return t ? JSON.parse(t) : {};
+}
 async function fetchPage(offset) {
   const q = new URLSearchParams({ offset: String(offset), limit: "100", sort: "Matches:desc", jsconfig: "eccn:true" });
-  const r = await fetch(API + "?" + q.toString());
-  if (!r.ok) throw new Error("HTTP " + r.status);
-  const j = await r.json();
+  const j = await getJSON("/participants/organisations/" + ORG + "/batting-statistics?" + q.toString());
   return j.participants || [];
 }
+const wicketApi = {
+  getBowlPage: async off => {
+    const q = new URLSearchParams({ offset: String(off), limit: "100", sort: "BowlingWickets:desc", jsconfig: "eccn:true" });
+    return (await getJSON("/participants/organisations/" + ORG + "/bowling-statistics?" + q.toString())).participants || [];
+  },
+  getSeasons: async () => (await getJSON("/fixturesladders/organisations/" + ORG + "/seasons?jsconfig=eccn%3Atrue")).seasons || [],
+  getTeams: async id => (await getJSON("/fixturesladders/organisations/" + ORG + "/teams?seasonId=" + id + "&jsconfig=eccn%3Atrue")).teams || [],
+  getPerf: async (pid, sid) => getJSON("/scores/players/" + pid + "/match-performances?seasonId=" + sid + "&matchTypeId=&ageGroupCategoryId=&jsconfig=eccn%3Atrue")
+};
 
 let maxGap = 0;
+let wDays = 7;
 let players = SNAPSHOT.players;
 let rows = computeRows(players);
 let asOf = SNAPSHOT.asOf;
+let wData = null;       /* result of buildWicketData, or null */
+let wState = "loading"; /* loading | ok | error */
+let wNow = new Date();
 
 function fmtDate(iso) {
   try {
     return new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(iso));
   } catch (e) { return iso; }
 }
+function fmtDay(ymd) {
+  const d = new Date(ymd + "T12:00:00Z");
+  const f = o => new Intl.DateTimeFormat("en-AU", Object.assign({ timeZone: "UTC" }, o)).format(d);
+  return f({ weekday: "short" }) + " " + f({ day: "numeric" }) + " " + f({ month: "short" });
+}
 function names(list) {
   const n = list.map(r => r.name);
   if (n.length <= 1) return n.join("");
   return n.slice(0, -1).join(", ") + " and " + n[n.length - 1];
 }
+function periodLabel() {
+  const win = windowFor(wDays, wNow);
+  const span = wDays === 28 ? "4 weeks" : wDays + " days";
+  return "the last " + span + " (" + fmtDay(win.start) + " to " + fmtDay(win.end) + ")";
+}
+
+/* ---- matches section ---- */
 function renderSummary() {
   const exact = rows.filter(r => r.gap === 0);
   const el = document.getElementById("summary");
@@ -249,25 +394,95 @@ function render() {
     grid.appendChild(card);
   }
 }
+
+/* ---- wickets section ---- */
+function currentCrossings() {
+  return wData ? crossings(wData, windowFor(wDays, wNow)) : [];
+}
+function renderWickets() {
+  const sum = document.getElementById("w-summary");
+  const grid = document.getElementById("w-grid");
+  grid.innerHTML = "";
+  if (wState === "loading" && !wData) { sum.textContent = "Checking wickets…"; return; }
+  if (wState === "error" && !wData) {
+    sum.innerHTML = '<span class="bad" style="margin:0">Could not load wickets from Play Cricket. Press Refresh to try again.</span>';
+    return;
+  }
+  const list = currentCrossings();
+  const period = periodLabel();
+  if (list.length) {
+    sum.innerHTML = "<strong>" + list.length + (list.length === 1 ? " milestone" : " milestones") + " crossed in " + period + ":</strong> " +
+      list.map(r => r.name + " (" + r.M + ")").join(", ") + ".";
+  } else {
+    sum.innerHTML = "<strong>Nobody crossed 100, 150, 200, 250 or 300 wickets in " + period + ".</strong>" +
+      (wDays < 28 ? " Try a longer period to see earlier crossings." : "");
+  }
+  if (wState === "error") {
+    sum.innerHTML += '<span class="bad">Could not refresh wickets, so these figures are from ' + fmtDate(wData.asOf) + ". Press Refresh to try again.</span>";
+  }
+  if (wData && wData.failed > 0) {
+    sum.innerHTML += '<span class="bad">Could not check ' + wData.failed + (wData.failed === 1 ? " player" : " players") + ". Press Refresh to try again.</span>";
+  }
+  for (const M of W_MILESTONES) {
+    const items = list.filter(r => r.M === M);
+    const card = document.createElement("section");
+    card.className = "card";
+    card.setAttribute("aria-label", "Crossed " + M + " wickets");
+    const head = document.createElement("div");
+    head.className = "card-head";
+    head.innerHTML = '<span class="big">' + M + '</span><span class="label">' + items.length + (items.length === 1 ? " player" : " players") + "</span>";
+    card.appendChild(head);
+    if (!items.length) {
+      const p = document.createElement("p");
+      p.className = "empty";
+      p.textContent = "Nobody crossed " + M + ".";
+      card.appendChild(p);
+    } else {
+      const ul = document.createElement("ul");
+      for (const r of items) {
+        const li = document.createElement("li");
+        const nm = document.createElement("span"); nm.className = "name"; nm.textContent = r.name;
+        const meta = document.createElement("span"); meta.className = "meta";
+        const tot = document.createElement("span"); tot.textContent = r.before + " to " + r.now + " wickets";
+        const pill = document.createElement("span"); pill.className = "pill now";
+        pill.textContent = "+" + r.took + (r.took === 1 ? " wicket" : " wickets");
+        meta.append(tot, pill);
+        li.append(nm, meta);
+        ul.appendChild(li);
+      }
+      card.appendChild(ul);
+    }
+    grid.appendChild(card);
+  }
+}
+
 function setStatus(kind) {
   const el = document.getElementById("status");
   if (kind === "loading") el.textContent = "Loading the latest data…";
   else if (kind === "live") el.textContent = "Live data, loaded " + fmtDate(asOf) + ".";
-  else el.innerHTML = '<span class="bad">Could not reach Play Cricket. Showing saved data from ' + fmtDate(asOf) + ". Press Refresh to try again.</span>";
+  else el.innerHTML = '<span class="bad">Could not reach Play Cricket. Showing saved matches data from ' + fmtDate(asOf) + ". Press Refresh to try again.</span>";
 }
 function copyText() {
-  const out = ["Parramatta Cheetahs milestone watch (" + fmtDate(asOf) + ")"];
+  const out = ["Parramatta Cheetahs milestone watch (" + fmtDate(asOf) + ")", "", "MATCHES: next game is a milestone"];
   for (const t of MILESTONES) {
     const list = rows.filter(r => r.t === t && r.gap <= maxGap);
     out.push("", "Approaching " + t + ":");
     if (!list.length) out.push("  Nobody");
     for (const r of list) out.push("  " + r.name + " (" + r.m + " played)");
   }
+  if (wData) {
+    out.push("", "WICKETS: crossed in " + periodLabel());
+    const list = currentCrossings();
+    for (const M of W_MILESTONES) {
+      const items = list.filter(r => r.M === M);
+      out.push("", "Crossed " + M + ":");
+      if (!items.length) out.push("  Nobody");
+      for (const r of items) out.push("  " + r.name + " (" + r.before + " to " + r.now + ", +" + r.took + ")");
+    }
+  }
   return out.join("\n");
 }
-async function refresh() {
-  const btn = document.getElementById("refresh");
-  btn.disabled = true; btn.textContent = "Refreshing…"; setStatus("loading");
+async function refreshMatches() {
   try {
     players = await loadPlayers(fetchPage);
     rows = computeRows(players);
@@ -276,14 +491,38 @@ async function refresh() {
   } catch (e) {
     setStatus("error");
   } finally {
-    btn.disabled = false; btn.textContent = "Refresh";
     renderSummary(); render();
   }
 }
-document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => {
+async function refreshWickets() {
+  wState = "loading";
+  renderWickets();
+  try {
+    const now = new Date();
+    wData = await buildWicketData(wicketApi, now);
+    wNow = now;
+    wState = "ok";
+  } catch (e) {
+    wState = "error";
+  } finally {
+    renderWickets();
+  }
+}
+async function refresh() {
+  const btn = document.getElementById("refresh");
+  btn.disabled = true; btn.textContent = "Refreshing…"; setStatus("loading");
+  await Promise.all([refreshMatches(), refreshWickets()]);
+  btn.disabled = false; btn.textContent = "Refresh";
+}
+document.querySelectorAll("#seg-matches button").forEach(b => b.addEventListener("click", () => {
   maxGap = Number(b.dataset.gap);
-  document.querySelectorAll(".seg button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  document.querySelectorAll("#seg-matches button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
   render();
+}));
+document.querySelectorAll("#seg-wickets button").forEach(b => b.addEventListener("click", () => {
+  wDays = Number(b.dataset.days);
+  document.querySelectorAll("#seg-wickets button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  renderWickets();
 }));
 document.getElementById("copy").addEventListener("click", async (e) => {
   const btn = e.currentTarget;
@@ -292,7 +531,7 @@ document.getElementById("copy").addEventListener("click", async (e) => {
   setTimeout(() => { btn.textContent = "Copy list"; }, 2000);
 });
 document.getElementById("refresh").addEventListener("click", refresh);
-renderSummary(); render();
+renderSummary(); render(); renderWickets();
 refresh();
 </script>
 </body>
