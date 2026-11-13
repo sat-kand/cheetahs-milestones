@@ -164,7 +164,7 @@ li { display: flex; flex-direction: column; gap: 2px; }
 .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--pill-bg); color: var(--pill-ink); font-weight: 600; }
 .pill.now { background: var(--gold); color: var(--brand); }
 .empty { color: var(--muted); font-size: 0.95rem; margin: 0; }
-.layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; align-items: start; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 28px; align-items: start; }
 .main { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
 .side { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 16px; }
 .watch { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--gold); border-radius: 6px; padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 8px; }
@@ -176,6 +176,8 @@ th { text-align: left; font-size: 0.8rem; font-weight: 600; color: var(--muted);
 td { padding: 7px 0; border-bottom: 1px solid var(--line); }
 tr:last-child td { border-bottom: 0; }
 th.num, td.num { text-align: right; padding-left: 12px; }
+th.team, td.team { text-align: left; padding-left: 14px; }
+td.team { font-size: 0.85rem; color: var(--muted); }
 td.num { font-weight: 700; color: var(--heading); }
 footer { color: var(--muted); font-size: 0.85rem; display: flex; flex-direction: column; gap: 6px; }
 footer p { margin: 0; }
@@ -377,12 +379,29 @@ function newestSeasons(seasons, now, n) {
     .sort((a, b) => parseDate(b.startDate) - parseDate(a.startDate))
     .slice(0, n);
 }
+/* Map(teamId -> label). The label is the grade the team plays in (for example "Senior B08"); it has .has() like a Set. */
+function gradeLabel(t) {
+  const g = t.grade && t.grade.name ? t.grade.name : t.name;
+  return String(g || "").replace(/\s+/g, " ").trim();
+}
 async function teamIdsFor(api, seasons) {
-  const ids = new Set();
-  await Promise.all(seasons.map(async s => { for (const t of await api.getTeams(s.id)) ids.add(t.id); }));
+  const ids = new Map();
+  await Promise.all(seasons.map(async s => { for (const t of await api.getTeams(s.id)) ids.set(t.id, gradeLabel(t)); }));
   return ids;
 }
-/* Who has played a Cheetahs match in the last ACTIVE_DAYS days? Returns Map(id -> true | false).
+/* The club grades a player appeared in, most matches first. */
+function teamsOf(matches, teamIds) {
+  const count = new Map();
+  for (const m of matches) {
+    const t = (m.teams || []).find(x => teamIds.has(x.id));
+    if (!t) continue;
+    const label = teamIds.get(t.id);
+    if (label) count.set(label, (count.get(label) || 0) + 1);
+  }
+  return [...count].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(e => e[0]);
+}
+/* Who has played a Cheetahs match in the last ACTIVE_DAYS days, and for which grade(s)?
+   Returns Map(id -> { active, teams }). teams comes from the newest season the player appeared in for the club.
    A player whose history could not be fetched is left out of the map, so the page keeps listing them. */
 async function findRecentlyActive(api, now, ids) {
   const cutoff = addDays(ymdSydney(now), -ACTIVE_DAYS);
@@ -393,10 +412,12 @@ async function findRecentlyActive(api, now, ids) {
     try {
       for (const s of seasons) {
         const perf = await api.getPerf(id, s.id);
-        const recent = (Array.isArray(perf) ? perf : []).some(m => (m.teams || []).some(t => teamIds.has(t.id)) && matchFinalDay(m) >= cutoff);
-        if (recent) { result.set(id, true); return; }
+        const club = (Array.isArray(perf) ? perf : []).filter(m => (m.teams || []).some(t => teamIds.has(t.id)));
+        if (!club.length) continue; /* nothing for the club this season, look at the one before */
+        result.set(id, { active: club.some(m => matchFinalDay(m) >= cutoff), teams: teamsOf(club, teamIds) });
+        return;
       }
-      result.set(id, false);
+      result.set(id, { active: false, teams: [] });
     } catch (e) { /* unknown */ }
   });
   return result;
@@ -497,7 +518,14 @@ function fmtDay(ymd) {
   return f({ weekday: "short" }) + " " + f({ day: "numeric" }) + " " + f({ month: "short" });
 }
 /* A player is shown unless the activity check found them dormant. Players it could not check stay listed. */
-function isShown(id) { return activity.state !== "ok" || activity.map.get(id) !== false; }
+function isShown(id) {
+  const a = activity.state === "ok" ? activity.map.get(id) : null;
+  return !a || a.active;
+}
+function teamText(id) {
+  const a = activity.state === "ok" ? activity.map.get(id) : null;
+  return a && a.teams.length ? a.teams.join(", ") : "";
+}
 function visibleRows() { return rows.filter(r => isShown(r.id)); }
 function activityNote() {
   return activity.state === "error" ? "Could not check who is still playing, so players who have left may be listed." : "";
@@ -647,13 +675,14 @@ function watchTable(list, countLabel, emptyText) {
   }
   const table = document.createElement("table");
   const thead = document.createElement("thead");
-  thead.innerHTML = '<tr><th scope="col">Player</th><th scope="col" class="num">' + countLabel + "</th></tr>";
+  thead.innerHTML = '<tr><th scope="col">Player</th><th scope="col" class="num">' + countLabel + '</th><th scope="col" class="team">Team</th></tr>';
   const tbody = document.createElement("tbody");
   for (const r of list) {
     const tr = document.createElement("tr");
     const a = document.createElement("td"); a.textContent = r.name;
     const b = document.createElement("td"); b.className = "num"; b.textContent = fmtNum(r.count);
-    tr.append(a, b);
+    const c = document.createElement("td"); c.className = "team"; c.textContent = teamText(r.id) || "–";
+    tr.append(a, b, c);
     tbody.appendChild(tr);
   }
   table.append(thead, tbody);
@@ -694,12 +723,12 @@ function copyText() {
   const out = ["Parramatta Cheetahs milestone watch (" + fmtDate(asOf) + ")", "", "WATCHLIST: matches (within 3 of a milestone)"];
   const mw = matchWatch();
   if (!mw.length) out.push("  Nobody");
-  for (const r of mw) out.push("  " + r.name + " " + r.count);
+  for (const r of mw) out.push("  " + r.name + " " + r.count + (teamText(r.id) ? " - " + teamText(r.id) : ""));
   for (const sec of sections) {
     out.push("", "WATCHLIST: " + sec.cfg.units + " (within " + sec.cfg.range + " of a milestone)");
     const sw = sectionWatch(sec);
     if (!sw || !sw.length) out.push("  " + (sw ? "Nobody" : "Not loaded"));
-    else for (const r of sw) out.push("  " + r.name + " " + fmtNum(r.count));
+    else for (const r of sw) out.push("  " + r.name + " " + fmtNum(r.count) + (teamText(r.id) ? " - " + teamText(r.id) : ""));
   }
   out.push("", "MATCHES: next game is a milestone");
   const vis = visibleRows();
