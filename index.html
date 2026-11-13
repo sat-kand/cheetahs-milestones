@@ -702,9 +702,6 @@ function auditTeam(sc, clubTeamId) {
       const cs = mine.reduce((a, f) => a + num(f.stumpings), 0);
       const cr = mine.reduce((a, f) => a + num(f.runOuts), 0);
       const withRO = mine.filter(f => num(f.runOuts) > 0).length;
-      if (cc < caught) blank.caught.forEach(t => add("fielding", t));
-      if (cs < stumped) blank.stumped.forEach(t => add("fielding", t));
-      if (cr < runOut) blank.runOut.forEach(t => add("fielding", t));
       if (cc !== caught) add("fielding", "Opponents' " + label + ": " + caught + " caught in the scorecard, but " + cc + (cc === 1 ? " catch is" : " catches are") + " credited to our fielders.");
       if (cs !== stumped) add("fielding", "Opponents' " + label + ": " + stumped + " stumped in the scorecard, but " + cs + (cs === 1 ? " stumping is" : " stumpings are") + " credited to our players.");
       /* an assisted run out credits two fielders, so more credits than run outs is normal */
