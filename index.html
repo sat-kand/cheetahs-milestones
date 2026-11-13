@@ -244,7 +244,7 @@ footer p { margin: 0; }
 
   <aside class="side" aria-labelledby="h-watch">
     <h2 id="h-watch">Watchlist</h2>
-    <p class="blurb">Only players who have played for the club in the last 12 months.</p>
+    <p class="blurb">Only players who have played for the club in the last 8 months.</p>
     <p class="bad" id="watch-note"></p>
     <div class="watch">
       <h3>Matches</h3>
@@ -266,7 +266,7 @@ footer p { margin: 0; }
 
   <footer>
     <p>Match counts come from the batting statistics, so they follow the same numbers as the club page. "Next game" means the player has played one match fewer than the milestone.</p>
-    <p>Players with no Cheetahs match in the last 12 months are treated as having left and are left out of the watchlist and the matches section.</p>
+    <p>Players with no Cheetahs match in the last 8 months are treated as having left and are left out of the watchlist and the matches section.</p>
     <p>Wickets and runs are career totals for Cheetahs matches across all seasons. A player counts as crossing a milestone when the wickets or runs in the period lift the total over it, so someone on 164 wickets only appears if they were below 150 before the period started. A two-day match counts on the day it finishes.</p>
   </footer>
 </div>
@@ -280,7 +280,7 @@ const SNAPSHOT = {"asOf":"2026-11-13T00:35:32Z","players":[{"n":"Soans, Gladson"
 /* LOGIC-START */
 const MILESTONES = [100, 150, 200, 250];
 const MATCH_WATCH_RANGE = 3; /* matches watchlist: 3 matches below a milestone or fewer (97, 98, 99 and so on) */
-const ACTIVE_DAYS = 365;     /* a player with no Cheetahs match in this many days is treated as dormant */
+const ACTIVE_DAYS = 240;     /* a player with no Cheetahs match in this many days is treated as dormant */
 
 /* Career statistics tracked for "crossed a milestone" and the watchlist.
    margin: only players up to this far above a milestone can have crossed it in a 4-week period.
@@ -476,7 +476,7 @@ let players = SNAPSHOT.players;
 let rows = computeRows(players);
 let asOf = SNAPSHOT.asOf;
 let matchState = "loading";
-let activity = { state: "loading", map: new Map() }; /* who has played for the club in the last 12 months */
+let activity = { state: "loading", map: new Map() }; /* who has played for the club in the last 8 months */
 
 /* One entry per "crossed a milestone" section. */
 const sections = [
