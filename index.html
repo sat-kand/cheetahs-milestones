@@ -677,6 +677,8 @@ function auditTeam(sc, clubTeamId) {
           " = " + sum + ", but the innings total is " + total + " (" + Math.abs(total - sum) + (sum < total ? " missing" : " too many") + ").");
       }
       for (const x of bowling) if (isHiddenName(x.playerShortName)) add("names", "Opponents' " + label + ": a bowler's name is hidden (shown as \"" + (String(x.playerShortName || "").trim() || "blank") + "\").");
+      /* A blank fielder in the opponents' batting card only matters when the credit is also missing from our players. */
+      const blank = { caught: [], stumped: [], runOut: [] };
       let caught = 0, stumped = 0, runOut = 0;
       for (const x of batting) {
         const type = String(x.dismissalType || ""), text = String(x.dismissalText || "");
@@ -684,15 +686,15 @@ function auditTeam(sc, clubTeamId) {
         if (/caught/i.test(type)) {
           caught++;
           const m = text.match(/^c\s*&\s*b:\s*(.*)$/i) || text.match(/^c:\s*(.*?)\s*b:/i);
-          if (m && !m[1].trim()) add("fielding", "Opponents' " + label + ": " + who + " was caught but no catcher is recorded (\"" + text.trim() + "\").");
+          if (m && !m[1].trim()) blank.caught.push("Opponents' " + label + ": " + who + " was caught but no catcher is recorded (\"" + text.trim() + "\").");
         } else if (/stump/i.test(type)) {
           stumped++;
           const m = text.match(/^st:\s*(.*?)\s*b:/i);
-          if (m && !m[1].trim()) add("fielding", "Opponents' " + label + ": " + who + " was stumped but no wicketkeeper is recorded (\"" + text.trim() + "\").");
+          if (m && !m[1].trim()) blank.stumped.push("Opponents' " + label + ": " + who + " was stumped but no wicketkeeper is recorded (\"" + text.trim() + "\").");
         } else if (/run out/i.test(type)) {
           runOut++;
           const m = text.match(/\(([^)]*)\)/);
-          if (!m || !m[1].trim()) add("fielding", "Opponents' " + label + ": " + who + " was run out but no fielder is recorded.");
+          if (!m || !m[1].trim()) blank.runOut.push("Opponents' " + label + ": " + who + " was run out but no fielder is recorded.");
         }
       }
       const mine = fielding.filter(f => !ourIds.size || ourIds.has(f.participantId));
@@ -700,6 +702,9 @@ function auditTeam(sc, clubTeamId) {
       const cs = mine.reduce((a, f) => a + num(f.stumpings), 0);
       const cr = mine.reduce((a, f) => a + num(f.runOuts), 0);
       const withRO = mine.filter(f => num(f.runOuts) > 0).length;
+      if (cc < caught) blank.caught.forEach(t => add("fielding", t));
+      if (cs < stumped) blank.stumped.forEach(t => add("fielding", t));
+      if (cr < runOut) blank.runOut.forEach(t => add("fielding", t));
       if (cc !== caught) add("fielding", "Opponents' " + label + ": " + caught + " caught in the scorecard, but " + cc + (cc === 1 ? " catch is" : " catches are") + " credited to our fielders.");
       if (cs !== stumped) add("fielding", "Opponents' " + label + ": " + stumped + " stumped in the scorecard, but " + cs + (cs === 1 ? " stumping is" : " stumpings are") + " credited to our players.");
       /* an assisted run out credits two fielders, so more credits than run outs is normal */
@@ -1180,10 +1185,12 @@ function renderAudit() {
   const bad = d.teams.filter(t => t.issues.length), total = d.teams.reduce((a, t) => a + t.issues.length, 0), unread = d.teams.filter(t => !t.loaded);
   sum.innerHTML = "<strong>" + d.round.name + "</strong> (" + xiiRounds(d.round) + "): " +
     (total ? "<strong>" + plural(total, "issue", "issues") + " to fix</strong> in " + bad.length + " of " + plural(d.teams.length, "team", "teams") + "."
-           : "no issues found in " + plural(d.teams.length, "team", "teams") + ".");
+           : "no issues found in " + plural(d.teams.length, "team", "teams") + ".") +
+    (total && bad.length < d.teams.length ? " The other " + plural(d.teams.length - bad.length - unread.length, "team has", "teams have") + " nothing to fix." : "");
   if (unread.length) sum.innerHTML += '<span class="bad">Could not read the scorecard for ' + plural(unread.length, "team", "teams") + ". Press Refresh to try again.</span>";
   if (audit.state === "error") sum.innerHTML += '<span class="bad">Could not refresh, so this is from ' + fmtDate(audit.at) + ". Press Refresh to try again.</span>";
   for (const t of d.teams) {
+    if (t.loaded && !t.issues.length) continue; /* teams with nothing to fix are not listed */
     const card = document.createElement("section");
     card.className = "card" + (t.issues.length || !t.loaded ? "" : " clean");
     card.setAttribute("aria-label", shortGrade(t.grade));
@@ -1219,6 +1226,7 @@ function auditText() {
   if (!d || !d.round) return "Parramatta Cheetahs scorecard audit: no completed round yet.";
   const out = ["Parramatta Cheetahs scorecard audit - " + d.round.name + " (" + xiiRounds(d.round) + ")"];
   for (const t of d.teams) {
+    if (t.loaded && !t.issues.length) continue;
     out.push("", shortGrade(t.grade) + " - " + t.name + (t.opponent ? " v " + t.opponent : ""));
     if (!t.loaded) out.push("  Scorecard could not be read");
     else if (!t.issues.length) out.push("  No issues");
