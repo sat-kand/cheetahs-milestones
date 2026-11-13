@@ -227,6 +227,17 @@ footer p { margin: 0; }
     </div>
     <div class="grid" id="w-grid"></div>
   </section>
+  <section class="block" aria-labelledby="h-runs">
+    <h2 id="h-runs">Runs</h2>
+    <p class="blurb">Players whose career runs went from below a milestone to 1,000, 1,500, 2,000 and so on up to 4,000 or more during the period.</p>
+    <div class="summary" id="r-summary">Checking runs…</div>
+    <div class="seg" id="seg-runs" role="group" aria-label="Period for runs milestones">
+      <button type="button" data-days="7" aria-pressed="true">Last 7 days</button>
+      <button type="button" data-days="14" aria-pressed="false">Last 14 days</button>
+      <button type="button" data-days="28" aria-pressed="false">Last 4 weeks</button>
+    </div>
+    <div class="grid" id="r-grid"></div>
+  </section>
   </div>
 
   <aside class="side" aria-labelledby="h-watch">
@@ -241,12 +252,17 @@ footer p { margin: 0; }
       <p class="cap">Within 5 wickets of a milestone</p>
       <div id="watch-wickets">Checking wickets…</div>
     </div>
+    <div class="watch">
+      <h3>Runs</h3>
+      <p class="cap">Within 50 runs of a milestone</p>
+      <div id="watch-runs">Checking runs…</div>
+    </div>
   </aside>
   </div>
 
   <footer>
     <p>Match counts come from the batting statistics, so they follow the same numbers as the club page. "Next game" means the player has played one match fewer than the milestone.</p>
-    <p>Wickets are career totals for Cheetahs matches across all seasons. A player counts as crossing a milestone when the wickets taken in the period lift the total over it, so someone on 164 only appears if they were below 150 before the period started. A two-day match counts on the day it finishes.</p>
+    <p>Wickets and runs are career totals for Cheetahs matches across all seasons. A player counts as crossing a milestone when the wickets or runs in the period lift the total over it, so someone on 164 wickets only appears if they were below 150 before the period started. A two-day match counts on the day it finishes.</p>
   </footer>
 </div>
 
@@ -258,18 +274,23 @@ const SNAPSHOT = {"asOf":"2026-11-13T00:35:32Z","players":[{"n":"Soans, Gladson"
 
 /* LOGIC-START */
 const MILESTONES = [100, 150, 200, 250];
-const W_MILESTONES = [100, 150, 200, 250, 300];
-const W_MARGIN = 40; /* only players within 40 wickets above a milestone can have crossed it in a 4-week period */
-const WATCH_RANGE = 5;       /* wickets watchlist: 5 wickets below a milestone or fewer */
 const MATCH_WATCH_RANGE = 3; /* matches watchlist: 3 matches below a milestone or fewer (97, 98, 99 and so on) */
 
-/* Watchlists: players within `range` below a milestone (for 3: 97 to 99, 147 to 149, ...), most advanced first. */
-function watchlist(items, milestones, getName, getCount, range) {
-  return items
-    .filter(p => milestones.some(M => getCount(p) >= M - range && getCount(p) <= M - 1))
-    .map(p => ({ name: displayName(getName(p)), count: getCount(p) }))
-    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-}
+/* Career statistics tracked for "crossed a milestone" and the watchlist.
+   margin: only players up to this far above a milestone can have crossed it in a 4-week period.
+   range: the watchlist covers players up to this far below a milestone. */
+const STATS = {
+  wickets: {
+    ms: [100, 150, 200, 250, 300], margin: 40, range: 5, unit: "wicket", units: "wickets", page: "getBowlPage",
+    total: p => p.statistics.bowlingWickets,
+    inMatch: m => (m.bowlingStatistics || []).reduce((a, b) => a + (b.wicketsTaken || 0), 0)
+  },
+  runs: {
+    ms: [1000, 1500, 2000, 2500, 3000, 3500, 4000], margin: 350, range: 50, unit: "run", units: "runs", page: "getBatPage",
+    total: p => p.statistics.battingAggregate,
+    inMatch: m => (m.battingStatistics || []).reduce((a, b) => a + (b.runsScored || 0), 0)
+  }
+};
 
 function displayName(n) {
   const i = n.indexOf(",");
@@ -296,7 +317,15 @@ async function loadPlayers(fetchPage) {
   return [...map.values()];
 }
 
-/* ---- wickets ---- */
+/* Watchlists: players within `range` below a milestone (for 3: 97 to 99, 147 to 149, ...), most advanced first. */
+function watchlist(items, milestones, getName, getCount, range) {
+  return items
+    .filter(p => milestones.some(M => getCount(p) >= M - range && getCount(p) <= M - 1))
+    .map(p => ({ name: displayName(getName(p)), count: getCount(p) }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
+/* ---- wickets and runs ---- */
 function parseDate(s) { return new Date(String(s).replace(/(\.\d{3})\d+/, "$1")); }
 function ymdSydney(d) {
   const parts = new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(d);
@@ -314,18 +343,15 @@ function matchFinalDay(m) {
   const stamps = (days.length ? days : [m.startDateTime]).map(x => +parseDate(x)).filter(x => !isNaN(x));
   return ymdSydney(new Date(Math.max(...stamps)));
 }
-function wicketsIn(m) {
-  return (m.bowlingStatistics || []).reduce((a, b) => a + (b.wicketsTaken || 0), 0);
-}
-/* Career wickets, highest first. Pages overlap so ties at a page edge cannot hide a player. */
-async function loadBowlers(getBowlPage) {
+/* Career totals, highest first. Pages overlap so ties at a page edge cannot hide a player. */
+async function loadTotals(getPage, cfg) {
   const map = new Map();
   for (let off = 1; off <= 2001; off += 50) {
-    const rows = await getBowlPage(off);
+    const rows = await getPage(off);
     if (!rows.length) break;
-    for (const p of rows) map.set(p.id, { id: p.id, n: p.name, w: p.statistics.bowlingWickets });
-    const min = Math.min(...rows.map(r => r.statistics.bowlingWickets));
-    if (min < W_MILESTONES[0] - WATCH_RANGE || rows.length < 100) break;
+    for (const p of rows) map.set(p.id, { id: p.id, n: p.name, v: cfg.total(p) });
+    const min = Math.min(...rows.map(cfg.total));
+    if (min < cfg.ms[0] - cfg.range || rows.length < 100) break;
   }
   return [...map.values()];
 }
@@ -338,12 +364,12 @@ async function mapLimit(items, limit, fn) {
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
   return out;
 }
-/* api = { getBowlPage(offset), getSeasons(), getTeams(seasonId), getPerf(playerId, seasonId) } */
-async function buildWicketData(api, now, onTotals) {
-  const bowlers = await loadBowlers(api.getBowlPage);
-  const watch = watchlist(bowlers, W_MILESTONES, p => p.n, p => p.w, WATCH_RANGE);
+/* api = { getBowlPage(offset), getBatPage(offset), getSeasons(), getTeams(seasonId), getPerf(playerId, seasonId) } */
+async function buildCrossData(api, now, cfg, onTotals) {
+  const totals = await loadTotals(api[cfg.page], cfg);
+  const watch = watchlist(totals, cfg.ms, p => p.n, p => p.v, cfg.range);
   if (onTotals) onTotals(watch);
-  const cands = bowlers.filter(p => W_MILESTONES.some(M => p.w >= M && p.w <= M + W_MARGIN));
+  const cands = totals.filter(p => cfg.ms.some(M => p.v >= M && p.v <= M + cfg.margin));
   const seasons = (await api.getSeasons())
     .filter(s => s.startDate && parseDate(s.startDate) <= now)
     .sort((a, b) => parseDate(b.startDate) - parseDate(a.startDate))
@@ -357,11 +383,11 @@ async function buildWicketData(api, now, onTotals) {
       try {
         const perf = await api.getPerf(p.id, s.id);
         for (const m of (Array.isArray(perf) ? perf : [])) {
-          if ((m.teams || []).some(t => teamIds.has(t.id))) matches.set(m.id, { d: matchFinalDay(m), w: wicketsIn(m) });
+          if ((m.teams || []).some(t => teamIds.has(t.id))) matches.set(m.id, { d: matchFinalDay(m), x: cfg.inMatch(m) });
         }
       } catch (e) { failed++; break; }
     }
-    return { id: p.id, n: p.n, w: p.w, matches: [...matches.values()] };
+    return { id: p.id, n: p.n, v: p.v, matches: [...matches.values()] };
   });
   return { players, failed, watch, asOf: now.toISOString() };
 }
@@ -369,12 +395,12 @@ function windowFor(days, now) {
   const end = ymdSydney(now);
   return { start: addDays(end, -(days - 1)), end };
 }
-function crossings(data, win) {
+function crossings(data, win, cfg) {
   const out = [];
   for (const p of data.players) {
-    const took = p.matches.filter(m => m.d >= win.start && m.d <= win.end).reduce((a, m) => a + m.w, 0);
-    const before = p.w - took;
-    for (const M of W_MILESTONES) if (before < M && M <= p.w) out.push({ M, name: displayName(p.n), before, now: p.w, took });
+    const took = p.matches.filter(m => m.d >= win.start && m.d <= win.end).reduce((a, m) => a + m.x, 0);
+    const before = p.v - took;
+    for (const M of cfg.ms) if (before < M && M <= p.v) out.push({ M, name: displayName(p.n), before, now: p.v, took });
   }
   return out.sort((a, b) => a.M - b.M || b.took - a.took || a.name.localeCompare(b.name));
 }
@@ -391,26 +417,40 @@ async function fetchPage(offset) {
   const j = await getJSON("/participants/organisations/" + ORG + "/batting-statistics?" + q.toString());
   return j.participants || [];
 }
-const wicketApi = {
-  getBowlPage: async off => {
-    const q = new URLSearchParams({ offset: String(off), limit: "100", sort: "BowlingWickets:desc", jsconfig: "eccn:true" });
-    return (await getJSON("/participants/organisations/" + ORG + "/bowling-statistics?" + q.toString())).participants || [];
-  },
-  getSeasons: async () => (await getJSON("/fixturesladders/organisations/" + ORG + "/seasons?jsconfig=eccn%3Atrue")).seasons || [],
-  getTeams: async id => (await getJSON("/fixturesladders/organisations/" + ORG + "/teams?seasonId=" + id + "&jsconfig=eccn%3Atrue")).teams || [],
-  getPerf: async (pid, sid) => getJSON("/scores/players/" + pid + "/match-performances?seasonId=" + sid + "&matchTypeId=&ageGroupCategoryId=&jsconfig=eccn%3Atrue")
-};
+/* One api object per refresh. Repeated requests (a player who is a candidate for both wickets and runs) are made once. */
+function makeApi() {
+  const memo = new Map();
+  const once = (key, fn) => {
+    if (!memo.has(key)) memo.set(key, fn().catch(e => { memo.delete(key); throw e; }));
+    return memo.get(key);
+  };
+  const statsPage = (kind, sort) => async off => {
+    const q = new URLSearchParams({ offset: String(off), limit: "100", sort: sort, jsconfig: "eccn:true" });
+    return (await getJSON("/participants/organisations/" + ORG + "/" + kind + "?" + q.toString())).participants || [];
+  };
+  return {
+    getBowlPage: statsPage("bowling-statistics", "BowlingWickets:desc"),
+    getBatPage: statsPage("batting-statistics", "BattingAggregate:desc"),
+    getSeasons: () => once("seasons", async () => (await getJSON("/fixturesladders/organisations/" + ORG + "/seasons?jsconfig=eccn%3Atrue")).seasons || []),
+    getTeams: id => once("teams" + id, async () => (await getJSON("/fixturesladders/organisations/" + ORG + "/teams?seasonId=" + id + "&jsconfig=eccn%3Atrue")).teams || []),
+    getPerf: (pid, sid) => once("perf" + pid + sid, () => getJSON("/scores/players/" + pid + "/match-performances?seasonId=" + sid + "&matchTypeId=&ageGroupCategoryId=&jsconfig=eccn%3Atrue"))
+  };
+}
 
 let maxGap = 0;
-let wDays = 7;
 let players = SNAPSHOT.players;
 let rows = computeRows(players);
 let asOf = SNAPSHOT.asOf;
-let wData = null;       /* result of buildWicketData, or null */
-let wState = "loading"; /* loading | ok | error */
-let wNow = new Date();
-let wWatch = null;      /* wickets watchlist rows, or null until the totals arrive */
+let matchState = "loading";
 
+/* One entry per "crossed a milestone" section. */
+const sections = [
+  { key: "wickets", cfg: STATS.wickets, showEmpty: true, ids: { summary: "w-summary", grid: "w-grid", seg: "seg-wickets", watch: "watch-wickets" } },
+  { key: "runs", cfg: STATS.runs, showEmpty: false, ids: { summary: "r-summary", grid: "r-grid", seg: "seg-runs", watch: "watch-runs" } }
+].map(s => Object.assign(s, { days: 7, data: null, state: "loading", watch: null, now: new Date() }));
+
+const $ = id => document.getElementById(id);
+function fmtNum(n) { return Number(n).toLocaleString("en-AU"); }
 function fmtDate(iso) {
   try {
     return new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(iso));
@@ -426,16 +466,20 @@ function names(list) {
   if (n.length <= 1) return n.join("");
   return n.slice(0, -1).join(", ") + " and " + n[n.length - 1];
 }
-function periodLabel() {
-  const win = windowFor(wDays, wNow);
-  const span = wDays === 28 ? "4 weeks" : wDays + " days";
+function listMilestones(cfg) {
+  const m = cfg.ms.map(fmtNum);
+  return m.slice(0, -1).join(", ") + " or " + m[m.length - 1];
+}
+function periodLabel(sec) {
+  const win = windowFor(sec.days, sec.now);
+  const span = sec.days === 28 ? "4 weeks" : sec.days + " days";
   return "the last " + span + " (" + fmtDay(win.start) + " to " + fmtDay(win.end) + ")";
 }
 
 /* ---- matches section ---- */
 function renderSummary() {
   const exact = rows.filter(r => r.gap === 0);
-  const el = document.getElementById("summary");
+  const el = $("summary");
   if (exact.length) {
     el.innerHTML = "<strong>" + exact.length + (exact.length === 1 ? " player is" : " players are") + " one game from a milestone:</strong> " + names(exact) + ".";
   } else {
@@ -446,7 +490,7 @@ function renderSummary() {
   }
 }
 function render() {
-  const grid = document.getElementById("grid");
+  const grid = $("grid");
   grid.innerHTML = "";
   for (const t of MILESTONES) {
     const list = rows.filter(r => r.t === t && r.gap <= maxGap);
@@ -482,47 +526,49 @@ function render() {
   }
 }
 
-/* ---- wickets section ---- */
-function currentCrossings() {
-  return wData ? crossings(wData, windowFor(wDays, wNow)) : [];
+/* ---- crossed-a-milestone sections (wickets, runs) ---- */
+function currentCrossings(sec) {
+  return sec.data ? crossings(sec.data, windowFor(sec.days, sec.now), sec.cfg) : [];
 }
-function renderWickets() {
-  const sum = document.getElementById("w-summary");
-  const grid = document.getElementById("w-grid");
+function renderSection(sec) {
+  const cfg = sec.cfg;
+  const sum = $(sec.ids.summary);
+  const grid = $(sec.ids.grid);
   grid.innerHTML = "";
-  if (wState === "loading" && !wData) { sum.textContent = "Checking wickets…"; return; }
-  if (wState === "error" && !wData) {
-    sum.innerHTML = '<span class="bad" style="margin:0">Could not load wickets from Play Cricket. Press Refresh to try again.</span>';
+  if (sec.state === "loading" && !sec.data) { sum.textContent = "Checking " + cfg.units + "…"; return; }
+  if (sec.state === "error" && !sec.data) {
+    sum.innerHTML = '<span class="bad" style="margin:0">Could not load ' + cfg.units + " from Play Cricket. Press Refresh to try again.</span>";
     return;
   }
-  const list = currentCrossings();
-  const period = periodLabel();
+  const list = currentCrossings(sec);
+  const period = periodLabel(sec);
   if (list.length) {
     sum.innerHTML = "<strong>" + list.length + (list.length === 1 ? " milestone" : " milestones") + " crossed in " + period + ":</strong> " +
-      list.map(r => r.name + " (" + r.M + ")").join(", ") + ".";
+      list.map(r => r.name + " (" + fmtNum(r.M) + ")").join(", ") + ".";
   } else {
-    sum.innerHTML = "<strong>Nobody crossed 100, 150, 200, 250 or 300 wickets in " + period + ".</strong>" +
-      (wDays < 28 ? " Try a longer period to see earlier crossings." : "");
+    sum.innerHTML = "<strong>Nobody crossed " + listMilestones(cfg) + " " + cfg.units + " in " + period + ".</strong>" +
+      (sec.days < 28 ? " Try a longer period to see earlier crossings." : "");
   }
-  if (wState === "error") {
-    sum.innerHTML += '<span class="bad">Could not refresh wickets, so these figures are from ' + fmtDate(wData.asOf) + ". Press Refresh to try again.</span>";
+  if (sec.state === "error") {
+    sum.innerHTML += '<span class="bad">Could not refresh ' + cfg.units + ", so these figures are from " + fmtDate(sec.data.asOf) + ". Press Refresh to try again.</span>";
   }
-  if (wData && wData.failed > 0) {
-    sum.innerHTML += '<span class="bad">Could not check ' + wData.failed + (wData.failed === 1 ? " player" : " players") + ". Press Refresh to try again.</span>";
+  if (sec.data && sec.data.failed > 0) {
+    sum.innerHTML += '<span class="bad">Could not check ' + sec.data.failed + (sec.data.failed === 1 ? " player" : " players") + ". Press Refresh to try again.</span>";
   }
-  for (const M of W_MILESTONES) {
+  for (const M of cfg.ms) {
     const items = list.filter(r => r.M === M);
+    if (!items.length && !sec.showEmpty) continue;
     const card = document.createElement("section");
     card.className = "card";
-    card.setAttribute("aria-label", "Crossed " + M + " wickets");
+    card.setAttribute("aria-label", "Crossed " + fmtNum(M) + " " + cfg.units);
     const head = document.createElement("div");
     head.className = "card-head";
-    head.innerHTML = '<span class="big">' + M + '</span><span class="label">' + items.length + (items.length === 1 ? " player" : " players") + "</span>";
+    head.innerHTML = '<span class="big">' + fmtNum(M) + '</span><span class="label">' + items.length + (items.length === 1 ? " player" : " players") + "</span>";
     card.appendChild(head);
     if (!items.length) {
       const p = document.createElement("p");
       p.className = "empty";
-      p.textContent = "Nobody crossed " + M + ".";
+      p.textContent = "Nobody crossed " + fmtNum(M) + ".";
       card.appendChild(p);
     } else {
       const ul = document.createElement("ul");
@@ -530,9 +576,9 @@ function renderWickets() {
         const li = document.createElement("li");
         const nm = document.createElement("span"); nm.className = "name"; nm.textContent = r.name;
         const meta = document.createElement("span"); meta.className = "meta";
-        const tot = document.createElement("span"); tot.textContent = r.before + " to " + r.now + " wickets";
+        const tot = document.createElement("span"); tot.textContent = fmtNum(r.before) + " to " + fmtNum(r.now) + " " + cfg.units;
         const pill = document.createElement("span"); pill.className = "pill now";
-        pill.textContent = "+" + r.took + (r.took === 1 ? " wicket" : " wickets");
+        pill.textContent = "+" + fmtNum(r.took) + " " + (r.took === 1 ? cfg.unit : cfg.units);
         meta.append(tot, pill);
         li.append(nm, meta);
         ul.appendChild(li);
@@ -560,7 +606,7 @@ function watchTable(list, countLabel, emptyText) {
   for (const r of list) {
     const tr = document.createElement("tr");
     const a = document.createElement("td"); a.textContent = r.name;
-    const b = document.createElement("td"); b.className = "num"; b.textContent = String(r.count);
+    const b = document.createElement("td"); b.className = "num"; b.textContent = fmtNum(r.count);
     tr.append(a, b);
     tbody.appendChild(tr);
   }
@@ -572,19 +618,22 @@ function matchWatch() {
   return watchlist(players, MILESTONES, p => p.n, p => p.m, MATCH_WATCH_RANGE);
 }
 function renderWatch() {
-  const m = document.getElementById("watch-matches");
+  const m = $("watch-matches");
   m.innerHTML = "";
   m.appendChild(watchTable(matchWatch(), "Matches", "Nobody within 3 matches of a milestone."));
-  const w = document.getElementById("watch-wickets");
-  w.innerHTML = "";
-  if (wWatch) w.appendChild(watchTable(wWatch, "Wickets", "Nobody within 5 wickets of a milestone."));
-  else if (wState === "error") {
-    const p = document.createElement("p"); p.className = "bad"; p.textContent = "Could not load wickets. Press Refresh to try again."; w.appendChild(p);
-  } else w.textContent = "Checking wickets…";
+  for (const sec of sections) {
+    const el = $(sec.ids.watch);
+    const label = sec.cfg.units.charAt(0).toUpperCase() + sec.cfg.units.slice(1);
+    el.innerHTML = "";
+    if (sec.watch) el.appendChild(watchTable(sec.watch, label, "Nobody within " + sec.cfg.range + " " + sec.cfg.units + " of a milestone."));
+    else if (sec.state === "error") {
+      const p = document.createElement("p"); p.className = "bad"; p.textContent = "Could not load " + sec.cfg.units + ". Press Refresh to try again."; el.appendChild(p);
+    } else el.textContent = "Checking " + sec.cfg.units + "…";
+  }
 }
 
 function setStatus(kind) {
-  const el = document.getElementById("status");
+  const el = $("status");
   if (kind === "loading") el.textContent = "Loading the latest data…";
   else if (kind === "live") el.textContent = "Live data, loaded " + fmtDate(asOf) + ".";
   else el.innerHTML = '<span class="bad">Could not reach Play Cricket. Showing saved matches data from ' + fmtDate(asOf) + ". Press Refresh to try again.</span>";
@@ -594,9 +643,11 @@ function copyText() {
   const mw = matchWatch();
   if (!mw.length) out.push("  Nobody");
   for (const r of mw) out.push("  " + r.name + " " + r.count);
-  out.push("", "WATCHLIST: wickets (within 5 of a milestone)");
-  if (!wWatch || !wWatch.length) out.push("  " + (wWatch ? "Nobody" : "Not loaded"));
-  else for (const r of wWatch) out.push("  " + r.name + " " + r.count);
+  for (const sec of sections) {
+    out.push("", "WATCHLIST: " + sec.cfg.units + " (within " + sec.cfg.range + " of a milestone)");
+    if (!sec.watch || !sec.watch.length) out.push("  " + (sec.watch ? "Nobody" : "Not loaded"));
+    else for (const r of sec.watch) out.push("  " + r.name + " " + fmtNum(r.count));
+  }
   out.push("", "MATCHES: next game is a milestone");
   for (const t of MILESTONES) {
     const list = rows.filter(r => r.t === t && r.gap <= maxGap);
@@ -604,49 +655,55 @@ function copyText() {
     if (!list.length) out.push("  Nobody");
     for (const r of list) out.push("  " + r.name + " (" + r.m + " played)");
   }
-  if (wData) {
-    out.push("", "WICKETS: crossed in " + periodLabel());
-    const list = currentCrossings();
-    for (const M of W_MILESTONES) {
+  for (const sec of sections) {
+    if (!sec.data) continue;
+    out.push("", sec.cfg.units.toUpperCase() + ": crossed in " + periodLabel(sec));
+    const list = currentCrossings(sec);
+    if (!list.length) out.push("  Nobody");
+    for (const M of sec.cfg.ms) {
       const items = list.filter(r => r.M === M);
-      out.push("", "Crossed " + M + ":");
-      if (!items.length) out.push("  Nobody");
-      for (const r of items) out.push("  " + r.name + " (" + r.before + " to " + r.now + ", +" + r.took + ")");
+      if (!items.length) continue;
+      out.push("", "Crossed " + fmtNum(M) + ":");
+      for (const r of items) out.push("  " + r.name + " (" + fmtNum(r.before) + " to " + fmtNum(r.now) + ", +" + fmtNum(r.took) + ")");
     }
   }
   return out.join("\n");
 }
 async function refreshMatches() {
+  matchState = "loading";
   try {
     players = await loadPlayers(fetchPage);
     rows = computeRows(players);
     asOf = new Date().toISOString();
+    matchState = "ok";
     setStatus("live");
   } catch (e) {
+    matchState = "error";
     setStatus("error");
   } finally {
     renderSummary(); render(); renderWatch();
   }
 }
-async function refreshWickets() {
-  wState = "loading";
-  renderWickets();
+async function refreshSection(sec, api) {
+  sec.state = "loading";
+  renderSection(sec);
   try {
     const now = new Date();
-    wData = await buildWicketData(wicketApi, now, watch => { wWatch = watch; renderWatch(); });
-    wWatch = wData.watch;
-    wNow = now;
-    wState = "ok";
+    sec.data = await buildCrossData(api, now, sec.cfg, watch => { sec.watch = watch; renderWatch(); });
+    sec.watch = sec.data.watch;
+    sec.now = now;
+    sec.state = "ok";
   } catch (e) {
-    wState = "error";
+    sec.state = "error";
   } finally {
-    renderWickets(); renderWatch();
+    renderSection(sec); renderWatch();
   }
 }
 async function refresh() {
-  const btn = document.getElementById("refresh");
+  const btn = $("refresh");
   btn.disabled = true; btn.textContent = "Refreshing…"; setStatus("loading");
-  await Promise.all([refreshMatches(), refreshWickets()]);
+  const api = makeApi();
+  await Promise.all([refreshMatches(), ...sections.map(sec => refreshSection(sec, api))]);
   btn.disabled = false; btn.textContent = "Refresh";
 }
 document.querySelectorAll("#seg-matches button").forEach(b => b.addEventListener("click", () => {
@@ -654,19 +711,21 @@ document.querySelectorAll("#seg-matches button").forEach(b => b.addEventListener
   document.querySelectorAll("#seg-matches button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
   render();
 }));
-document.querySelectorAll("#seg-wickets button").forEach(b => b.addEventListener("click", () => {
-  wDays = Number(b.dataset.days);
-  document.querySelectorAll("#seg-wickets button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
-  renderWickets();
-}));
-document.getElementById("copy").addEventListener("click", async (e) => {
+for (const sec of sections) {
+  document.querySelectorAll("#" + sec.ids.seg + " button").forEach(b => b.addEventListener("click", () => {
+    sec.days = Number(b.dataset.days);
+    document.querySelectorAll("#" + sec.ids.seg + " button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    renderSection(sec);
+  }));
+}
+$("copy").addEventListener("click", async (e) => {
   const btn = e.currentTarget;
   try { await navigator.clipboard.writeText(copyText()); btn.textContent = "Copied"; }
   catch (err) { btn.textContent = "Copy not available"; }
   setTimeout(() => { btn.textContent = "Copy list"; }, 2000);
 });
-document.getElementById("refresh").addEventListener("click", refresh);
-renderSummary(); render(); renderWickets(); renderWatch();
+$("refresh").addEventListener("click", refresh);
+renderSummary(); render(); sections.forEach(renderSection); renderWatch();
 refresh();
 </script>
 </body>
