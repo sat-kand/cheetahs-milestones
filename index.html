@@ -301,7 +301,7 @@ footer p { margin: 0; }
     </section>
     <footer>
       <p>The round is the most recent one in which every senior match, in every grade, has finished. A round still in progress is skipped until its last match is complete. Junior, girls and Sunday T20 teams are not included.</p>
-      <p>Runs and wickets are added up over the whole round, so a two-day match counts both innings. Run scorers who tie go to the player from the higher grade (Senior A, then A Reserve, then B01 downwards). The wicketkeeper is the player with the most keeper catches and stumpings, and a tie goes to the one with more runs. Wicket takers who tie go to the one who conceded fewer runs, and then the one who bowled fewer overs.</p>
+      <p>Every innings counts on its own and nothing is added up across innings or matches, so a two-day match gives two separate innings. A batter is judged on his best single innings, a bowler on his best single bowling innings and the wicketkeeper on the most keeper catches and stumpings in one innings. Run scorers who tie go to the player from the higher grade (Senior A, then A Reserve, then B01 downwards). A wicketkeeper tie goes to the one with the higher score. Wicket takers who tie go to the one who conceded fewer runs, and then the one who bowled fewer overs.</p>
       <p>Each player fills one place only, picked in that order: batters first, then the wicketkeeper, then the bowlers. A player already picked is skipped for the next place, so the next best player comes in.</p>
     </footer>
   </div>
@@ -495,23 +495,20 @@ function tidyName(n) {
   const s = String(n || "").trim();
   return s && s === s.toUpperCase() ? s.toLowerCase().replace(/(^|[\s'-])([a-z])/g, (x, a, b) => a + b.toUpperCase()) : s;
 }
-/* What one player did in one match, summed over the innings. */
-function matchFigures(m) {
-  const sum = (arr, f) => (arr || []).reduce((a, x) => a + (Number(x[f]) || 0), 0);
-  const f = m.fieldingStatistics || [];
+/* What one player did in each innings of one match. Innings are never added together: a two-day match gives two
+   separate innings with a bat, ball and fielding line each. */
+function inningsFigures(m) {
+  const n = v => Number(v) || 0;
   return {
-    runs: sum(m.battingStatistics, "runsScored"),
-    wkts: sum(m.bowlingStatistics, "wicketsTaken"),
-    conc: sum(m.bowlingStatistics, "runsConceded"),
-    balls: (m.bowlingStatistics || []).reduce((a, x) => a + oversToBalls(x.oversBowled), 0),
-    kc: sum(f, "wicketKeeperCatches"),
-    st: sum(f, "stumpings"),
-    batted: (m.battingStatistics || []).length > 0
+    bat: (m.battingStatistics || []).map(x => ({ runs: n(x.runsScored) })),
+    bowl: (m.bowlingStatistics || []).map(x => ({ wkts: n(x.wicketsTaken), conc: n(x.runsConceded), balls: oversToBalls(x.oversBowled) })),
+    keep: (m.fieldingStatistics || []).map(x => ({ kc: n(x.wicketKeeperCatches), st: n(x.stumpings) }))
   };
 }
-/* The Club XII: top batters by runs (tie: higher grade), then the wicketkeeper with most dismissals (tie: more runs),
-   then top bowlers by wickets (tie: fewer runs conceded, then fewer overs). Each player fills one place only, in that
-   order, so a player already picked is skipped for the next category. Anything still level falls back to name. */
+/* The Club XII, judged on single innings: top batters by their best innings (tie: higher grade), then the wicketkeeper
+   with most dismissals in an innings (tie: higher score), then top bowlers by their best bowling innings (tie: fewer runs
+   conceded, then fewer overs). Each player fills one place only, in that order, so a player already picked is skipped
+   for the next category. Anything still level falls back to name. */
 function selectXII(players) {
   const picked = new Set();
   const byName = (a, b) => a.name.localeCompare(b.name);
@@ -579,17 +576,31 @@ async function buildClubXII(api, now) {
   await mapLimit([...roster.values()], 6, async e => {
     let perf;
     try { perf = await api.getPerf(e.id, round.seasonId); } catch (x) { failed++; return; }
-    const tot = { runs: 0, wkts: 0, conc: 0, balls: 0, kc: 0, st: 0 };
+    /* best single innings in each discipline, with the grade it was played in */
+    const best = { runs: 0, batGrade: null, wkts: 0, conc: 0, balls: 0, bowlGrade: null, kc: 0, st: 0, keepGrade: null };
     let played = 0;
+    const higher = (g, cur) => !cur || gradeRank(g) < gradeRank(cur);
     for (const m of (Array.isArray(perf) ? perf : [])) {
       if (!e.grades.has(m.id)) continue;
-      const f = matchFigures(m);
-      for (const k of Object.keys(tot)) tot[k] += f[k];
       played++;
+      const g = e.grades.get(m.id);
+      const f = inningsFigures(m);
+      for (const b of f.bat) {
+        if (!best.batGrade || b.runs > best.runs || (b.runs === best.runs && higher(g, best.batGrade))) { best.runs = b.runs; best.batGrade = g; }
+      }
+      for (const b of f.bowl) {
+        const better = !best.bowlGrade || b.wkts > best.wkts || (b.wkts === best.wkts && (b.conc < best.conc || (b.conc === best.conc && (b.balls < best.balls || (b.balls === best.balls && higher(g, best.bowlGrade))))));
+        if (better) { best.wkts = b.wkts; best.conc = b.conc; best.balls = b.balls; best.bowlGrade = g; }
+      }
+      for (const k of f.keep) {
+        const d = k.kc + k.st, cur = best.kc + best.st;
+        if (!best.keepGrade || d > cur || (d === cur && higher(g, best.keepGrade))) { best.kc = k.kc; best.st = k.st; best.keepGrade = g; }
+      }
     }
     if (!played) return;
     const grades = [...new Set(e.grades.values())].sort((a, b) => gradeRank(a) - gradeRank(b));
-    players.push({ id: e.id, name: e.name, keeperRole: e.keeperRole, grade: grades[0], rank: gradeRank(grades[0]), ...tot });
+    const grade = best.batGrade || grades[0];
+    players.push({ id: e.id, name: e.name, keeperRole: e.keeperRole, grade, rank: gradeRank(grade), ...best });
   });
   return { round: { name: round.name, season: round.season, first: round.first, last: round.last, matches: round.matches.size },
            players, failed, failedTeams, xii: selectXII(players) };
@@ -897,6 +908,9 @@ $("refresh").addEventListener("click", refresh);
 /* ---- Club XII tab ---- */
 let xii = { state: "idle", data: null, at: null };
 const plural = (n, one, many) => n + " " + (n === 1 ? one : many);
+function gradeFor(kind, p) {
+  return (kind === "bat" ? p.batGrade : kind === "keep" ? p.keepGrade : p.bowlGrade) || p.grade;
+}
 function xiiFigure(kind, p) {
   if (kind === "bat") return plural(p.runs, "run", "runs");
   if (kind === "keep") return plural(p.kc, "catch", "catches") + ", " + plural(p.st, "stumping", "stumpings");
@@ -921,7 +935,7 @@ function renderXII() {
     return;
   }
   const r = d.round;
-  sum.innerHTML = "<strong>" + r.name + "</strong> (" + xiiRounds(r) + ", " + r.season + "): chosen from " + plural(r.matches, "senior match", "senior matches") + ".";
+  sum.innerHTML = "<strong>" + r.name + "</strong> (" + xiiRounds(r) + ", " + r.season + "): chosen from " + plural(r.matches, "senior match", "senior matches") + ", best single innings.";
   if (xii.state === "error") sum.innerHTML += '<span class="bad">Could not refresh, so this is from ' + fmtDate(xii.at) + ". Press Refresh to try again.</span>";
   if (d.failed > 0) sum.innerHTML += '<span class="bad">Could not check ' + plural(d.failed, "player", "players") + ", so they may be missing. Press Refresh to try again.</span>";
   const x = d.xii;
@@ -951,7 +965,7 @@ function renderXII() {
         nm.append(num, document.createTextNode(p.name));
         const meta = document.createElement("span"); meta.className = "meta";
         const fig = document.createElement("span"); fig.textContent = xiiFigure(g.kind, p);
-        const pill = document.createElement("span"); pill.className = "pill"; pill.textContent = p.grade;
+        const pill = document.createElement("span"); pill.className = "pill"; pill.textContent = gradeFor(g.kind, p);
         meta.append(fig, pill);
         li.append(nm, meta);
         ul.appendChild(li);
@@ -969,9 +983,9 @@ function xiiText() {
   if (!d || !d.round) return "Parramatta Cheetahs Senior Club XII: no completed round yet.";
   const out = ["Parramatta Cheetahs Senior Club XII - " + d.round.name + " (" + xiiRounds(d.round) + ")", ""];
   let k = 0;
-  for (const p of d.xii.batters) out.push(++k + ". " + p.name + " (" + p.grade + ") - " + xiiFigure("bat", p));
-  if (d.xii.keeper) out.push(++k + ". " + d.xii.keeper.name + " (" + d.xii.keeper.grade + ") - wicketkeeper, " + xiiFigure("keep", d.xii.keeper));
-  for (const p of d.xii.bowlers) out.push(++k + ". " + p.name + " (" + p.grade + ") - " + xiiFigure("bowl", p));
+  for (const p of d.xii.batters) out.push(++k + ". " + p.name + " (" + gradeFor("bat", p) + ") - " + xiiFigure("bat", p));
+  if (d.xii.keeper) out.push(++k + ". " + d.xii.keeper.name + " (" + gradeFor("keep", d.xii.keeper) + ") - wicketkeeper, " + xiiFigure("keep", d.xii.keeper));
+  for (const p of d.xii.bowlers) out.push(++k + ". " + p.name + " (" + gradeFor("bowl", p) + ") - " + xiiFigure("bowl", p));
   return out.join("\n");
 }
 let xiiRun = 0;
