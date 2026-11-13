@@ -57,7 +57,7 @@ body {
   font-size: 16px;
   line-height: 1.45;
 }
-.wrap { max-width: 1040px; margin: 0 auto; padding: 28px 16px 48px; display: flex; flex-direction: column; gap: 28px; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 28px 16px 48px; display: flex; flex-direction: column; gap: 28px; }
 header { display: flex; flex-direction: column; gap: 4px; }
 h1 {
   margin: 0;
@@ -129,6 +129,29 @@ li { display: flex; flex-direction: column; gap: 2px; }
 .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .pill.now { background: var(--accent); color: var(--accent-ink); }
 .empty { color: var(--muted); font-size: 0.95rem; margin: 0; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; align-items: start; }
+.main { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
+.side { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 16px; }
+.watch { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.2rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.watch .cap { margin: 0; color: var(--muted); font-size: 0.85rem; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th { text-align: left; font-size: 0.8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 0; border-bottom: 2px solid var(--line); }
+td { padding: 7px 0; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+th.num, td.num { text-align: right; padding-left: 12px; }
+td.num { font-weight: 600; }
+@media (max-width: 860px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .side { position: static; order: -1; }
+}
 footer { color: var(--muted); font-size: 0.85rem; display: flex; flex-direction: column; gap: 6px; }
 footer p { margin: 0; }
 @media (max-width: 420px) { h1 { font-size: 1.8rem; } .big { font-size: 2.2rem; } }
@@ -146,6 +169,8 @@ footer p { margin: 0; }
     <div class="actions"><button type="button" class="refresh" id="refresh">Refresh</button><button type="button" class="copy" id="copy">Copy list</button></div>
   </div>
 
+  <div class="layout">
+  <div class="main">
   <section class="block" aria-labelledby="h-matches">
     <h2 id="h-matches">Matches</h2>
     <p class="blurb">Players whose next game is their 100th, 150th, 200th or 250th.</p>
@@ -169,6 +194,22 @@ footer p { margin: 0; }
     </div>
     <div class="grid" id="w-grid"></div>
   </section>
+  </div>
+
+  <aside class="side" aria-labelledby="h-watch">
+    <h2 id="h-watch">Watchlist</h2>
+    <div class="watch">
+      <h3>Matches</h3>
+      <p class="cap">Within 5 matches of a milestone</p>
+      <div id="watch-matches"></div>
+    </div>
+    <div class="watch">
+      <h3>Wickets</h3>
+      <p class="cap">Within 5 wickets of a milestone</p>
+      <div id="watch-wickets">Checking wickets…</div>
+    </div>
+  </aside>
+  </div>
 
   <footer>
     <p>Match counts come from the batting statistics, so they follow the same numbers as the club page. "Next game" means the player has played one match fewer than the milestone.</p>
@@ -186,6 +227,15 @@ const SNAPSHOT = {"asOf":"2026-11-13T00:35:32Z","players":[{"n":"Soans, Gladson"
 const MILESTONES = [100, 150, 200, 250];
 const W_MILESTONES = [100, 150, 200, 250, 300];
 const W_MARGIN = 40; /* only players within 40 wickets above a milestone can have crossed it in a 4-week period */
+const WATCH_RANGE = 5; /* watchlist: within 5 matches or 5 wickets below a milestone */
+
+/* Watchlists: players on 95 to 99 (145 to 149, ...) matches or wickets, most advanced first. */
+function watchlist(items, milestones, getName, getCount) {
+  return items
+    .filter(p => milestones.some(M => getCount(p) >= M - WATCH_RANGE && getCount(p) <= M - 1))
+    .map(p => ({ name: displayName(getName(p)), count: getCount(p) }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
 
 function displayName(n) {
   const i = n.indexOf(",");
@@ -241,7 +291,7 @@ async function loadBowlers(getBowlPage) {
     if (!rows.length) break;
     for (const p of rows) map.set(p.id, { id: p.id, n: p.name, w: p.statistics.bowlingWickets });
     const min = Math.min(...rows.map(r => r.statistics.bowlingWickets));
-    if (min < W_MILESTONES[0] || rows.length < 100) break;
+    if (min < W_MILESTONES[0] - WATCH_RANGE || rows.length < 100) break;
   }
   return [...map.values()];
 }
@@ -255,8 +305,10 @@ async function mapLimit(items, limit, fn) {
   return out;
 }
 /* api = { getBowlPage(offset), getSeasons(), getTeams(seasonId), getPerf(playerId, seasonId) } */
-async function buildWicketData(api, now) {
+async function buildWicketData(api, now, onTotals) {
   const bowlers = await loadBowlers(api.getBowlPage);
+  const watch = watchlist(bowlers, W_MILESTONES, p => p.n, p => p.w);
+  if (onTotals) onTotals(watch);
   const cands = bowlers.filter(p => W_MILESTONES.some(M => p.w >= M && p.w <= M + W_MARGIN));
   const seasons = (await api.getSeasons())
     .filter(s => s.startDate && parseDate(s.startDate) <= now)
@@ -277,7 +329,7 @@ async function buildWicketData(api, now) {
     }
     return { id: p.id, n: p.n, w: p.w, matches: [...matches.values()] };
   });
-  return { players, failed, asOf: now.toISOString() };
+  return { players, failed, watch, asOf: now.toISOString() };
 }
 function windowFor(days, now) {
   const end = ymdSydney(now);
@@ -323,6 +375,7 @@ let asOf = SNAPSHOT.asOf;
 let wData = null;       /* result of buildWicketData, or null */
 let wState = "loading"; /* loading | ok | error */
 let wNow = new Date();
+let wWatch = null;      /* wickets watchlist rows, or null until the totals arrive */
 
 function fmtDate(iso) {
   try {
@@ -456,6 +509,46 @@ function renderWickets() {
   }
 }
 
+/* ---- watchlist (sidebar) ---- */
+function watchTable(list, countLabel, emptyText) {
+  const box = document.createDocumentFragment();
+  if (!list.length) {
+    const p = document.createElement("p");
+    p.className = "empty";
+    p.textContent = emptyText;
+    box.appendChild(p);
+    return box;
+  }
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  thead.innerHTML = '<tr><th scope="col">Player</th><th scope="col" class="num">' + countLabel + "</th></tr>";
+  const tbody = document.createElement("tbody");
+  for (const r of list) {
+    const tr = document.createElement("tr");
+    const a = document.createElement("td"); a.textContent = r.name;
+    const b = document.createElement("td"); b.className = "num"; b.textContent = String(r.count);
+    tr.append(a, b);
+    tbody.appendChild(tr);
+  }
+  table.append(thead, tbody);
+  box.appendChild(table);
+  return box;
+}
+function matchWatch() {
+  return watchlist(players, MILESTONES, p => p.n, p => p.m);
+}
+function renderWatch() {
+  const m = document.getElementById("watch-matches");
+  m.innerHTML = "";
+  m.appendChild(watchTable(matchWatch(), "Matches", "Nobody within 5 matches of a milestone."));
+  const w = document.getElementById("watch-wickets");
+  w.innerHTML = "";
+  if (wWatch) w.appendChild(watchTable(wWatch, "Wickets", "Nobody within 5 wickets of a milestone."));
+  else if (wState === "error") {
+    const p = document.createElement("p"); p.className = "bad"; p.textContent = "Could not load wickets. Press Refresh to try again."; w.appendChild(p);
+  } else w.textContent = "Checking wickets…";
+}
+
 function setStatus(kind) {
   const el = document.getElementById("status");
   if (kind === "loading") el.textContent = "Loading the latest data…";
@@ -463,7 +556,14 @@ function setStatus(kind) {
   else el.innerHTML = '<span class="bad">Could not reach Play Cricket. Showing saved matches data from ' + fmtDate(asOf) + ". Press Refresh to try again.</span>";
 }
 function copyText() {
-  const out = ["Parramatta Cheetahs milestone watch (" + fmtDate(asOf) + ")", "", "MATCHES: next game is a milestone"];
+  const out = ["Parramatta Cheetahs milestone watch (" + fmtDate(asOf) + ")", "", "WATCHLIST: matches (within 5 of a milestone)"];
+  const mw = matchWatch();
+  if (!mw.length) out.push("  Nobody");
+  for (const r of mw) out.push("  " + r.name + " " + r.count);
+  out.push("", "WATCHLIST: wickets (within 5 of a milestone)");
+  if (!wWatch || !wWatch.length) out.push("  " + (wWatch ? "Nobody" : "Not loaded"));
+  else for (const r of wWatch) out.push("  " + r.name + " " + r.count);
+  out.push("", "MATCHES: next game is a milestone");
   for (const t of MILESTONES) {
     const list = rows.filter(r => r.t === t && r.gap <= maxGap);
     out.push("", "Approaching " + t + ":");
@@ -491,7 +591,7 @@ async function refreshMatches() {
   } catch (e) {
     setStatus("error");
   } finally {
-    renderSummary(); render();
+    renderSummary(); render(); renderWatch();
   }
 }
 async function refreshWickets() {
@@ -499,13 +599,14 @@ async function refreshWickets() {
   renderWickets();
   try {
     const now = new Date();
-    wData = await buildWicketData(wicketApi, now);
+    wData = await buildWicketData(wicketApi, now, watch => { wWatch = watch; renderWatch(); });
+    wWatch = wData.watch;
     wNow = now;
     wState = "ok";
   } catch (e) {
     wState = "error";
   } finally {
-    renderWickets();
+    renderWickets(); renderWatch();
   }
 }
 async function refresh() {
@@ -531,7 +632,7 @@ document.getElementById("copy").addEventListener("click", async (e) => {
   setTimeout(() => { btn.textContent = "Copy list"; }, 2000);
 });
 document.getElementById("refresh").addEventListener("click", refresh);
-renderSummary(); render(); renderWickets();
+renderSummary(); render(); renderWickets(); renderWatch();
 refresh();
 </script>
 </body>
