@@ -545,15 +545,16 @@ async function buildClubXII(api, now) {
         if (m.matchType === "BYE" || !m.round) continue;
         const key = s.id + "|" + m.round.name;
         const r = rounds.get(key) || { key, seasonId: s.id, season: s.name, name: m.round.name, matches: new Map() };
-        const days = (m.matchSchedule || []).map(x => x.startDateTime).filter(Boolean).map(x => ymdSydney(parseDate(x))).sort();
-        r.matches.set(m.id, { id: m.id, status: m.status, first: days[0] || matchFinalDay(m), last: matchFinalDay(m) });
+        /* matches not yet scheduled can have no dates at all */
+        const days = (m.matchSchedule || []).map(x => parseDate(x.startDateTime)).filter(d => !isNaN(d)).map(ymdSydney).sort();
+        r.matches.set(m.id, { id: m.id, status: m.status, first: days[0] || "", last: days[days.length - 1] || "" });
         rounds.set(key, r);
       }
     });
   }
   const done = [...rounds.values()].filter(r => r.matches.size && [...r.matches.values()].every(m => !NOT_FINISHED.has(m.status)))
-    .map(r => ({ ...r, first: [...r.matches.values()].map(m => m.first).sort()[0], last: [...r.matches.values()].map(m => m.last).sort().pop() }))
-    .filter(r => r.last <= today)
+    .map(r => ({ ...r, first: [...r.matches.values()].map(m => m.first).filter(Boolean).sort()[0] || "", last: [...r.matches.values()].map(m => m.last).filter(Boolean).sort().pop() || "" }))
+    .filter(r => r.last && r.last <= today)
     .sort((a, b) => b.last.localeCompare(a.last));
   if (failedTeams) return { round: null, failedTeams };
   const round = done[0];
