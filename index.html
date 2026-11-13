@@ -4,47 +4,65 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cheetahs Milestone Watch</title>
+<meta name="theme-color" content="#452403">
+<link rel="icon" type="image/png" href="logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-/* Layout idea: page title and actions, then two plain sections (matches, wickets), each a summary line over milestone cards. */
+/* Layout idea: a brown masthead carrying the club crest, then the matches and wickets sections beside a sticky watchlist.
+   Brown (club primary) carries text and structure; gold (club secondary) marks emphasis and actions. */
 :root {
-  --bg: #f3f6f5;
+  --brand: #452403;
+  --gold: #FFC72C;
+  --bg: #f6f2ec;
   --surface: #ffffff;
-  --ink: #14211d;
-  --muted: #5a6b66;
-  --line: #d5dedb;
-  --accent: #1d5c4a;
-  --accent-ink: #ffffff;
-  --accent-soft: #dcece6;
+  --ink: #2b1d10;
+  --muted: #6b5a48;
+  --line: #e3d9cb;
+  --heading: #452403;
+  --hover: #fbf0cf;
+  --pill-bg: #fbeec2;
+  --pill-ink: #452403;
+  --seg-on-bg: #452403;
+  --seg-on-ink: #ffffff;
+  --focus: #452403;
   --bad: #b3261e;
+  --on-brand-muted: #e6d6bd;
   --font-display: "Barlow Condensed", "Arial Narrow", Arial, sans-serif;
   --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0f1816;
-    --surface: #17231f;
-    --ink: #e8f0ed;
-    --muted: #93a8a1;
-    --line: #2a3b36;
-    --accent: #5fc4a2;
-    --accent-ink: #08201a;
-    --accent-soft: #1e3a31;
+    --bg: #1a0e04;
+    --surface: #2a1a0a;
+    --ink: #f5ecde;
+    --muted: #c2b093;
+    --line: #4a3520;
+    --heading: #FFC72C;
+    --hover: #3a260f;
+    --pill-bg: #4a3514;
+    --pill-ink: #ffd766;
+    --seg-on-bg: #FFC72C;
+    --seg-on-ink: #452403;
+    --focus: #FFC72C;
     --bad: #ff9b94;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0f1816;
-  --surface: #17231f;
-  --ink: #e8f0ed;
-  --muted: #93a8a1;
-  --line: #2a3b36;
-  --accent: #5fc4a2;
-  --accent-ink: #08201a;
-  --accent-soft: #1e3a31;
+  --bg: #1a0e04;
+  --surface: #2a1a0a;
+  --ink: #f5ecde;
+  --muted: #c2b093;
+  --line: #4a3520;
+  --heading: #FFC72C;
+  --hover: #3a260f;
+  --pill-bg: #4a3514;
+  --pill-ink: #ffd766;
+  --seg-on-bg: #FFC72C;
+  --seg-on-ink: #452403;
+  --focus: #FFC72C;
   --bad: #ff9b94;
   color-scheme: dark;
 }
@@ -57,29 +75,46 @@ body {
   font-size: 16px;
   line-height: 1.45;
 }
+.masthead { background: var(--brand); border-bottom: 5px solid var(--gold); }
+.masthead-in { max-width: 1180px; margin: 0 auto; padding: 14px 16px; display: flex; align-items: center; gap: 18px; }
+.logo { height: 96px; width: auto; flex: none; display: block; }
+.masthead-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 16px 48px; display: flex; flex-direction: column; gap: 28px; }
-header { display: flex; flex-direction: column; gap: 4px; }
 h1 {
   margin: 0;
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 2.2rem;
+  font-size: 2.4rem;
+  line-height: 1.05;
   letter-spacing: 0.01em;
   text-transform: uppercase;
+  color: #ffffff;
   text-wrap: balance;
 }
 h2 {
   margin: 0;
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 1.5rem;
+  font-size: 1.6rem;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+  color: var(--heading);
   text-wrap: balance;
 }
-.sub { margin: 0; color: var(--muted); font-size: 0.95rem; }
-.sub a { color: var(--accent); }
+h2::after { content: ""; display: block; width: 44px; height: 4px; margin-top: 6px; background: var(--gold); border-radius: 2px; }
+h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.25rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--heading);
+}
+.sub { margin: 0; color: var(--on-brand-muted); font-size: 0.95rem; }
+.sub a { color: var(--gold); }
 .bad { color: var(--bad); font-weight: 500; }
+.masthead .bad { color: #ffb4ab; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
 .actions { display: flex; gap: 8px; }
 .block { display: flex; flex-direction: column; gap: 14px; }
@@ -87,7 +122,7 @@ h2 {
 .summary {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-left: 6px solid var(--accent);
+  border-left: 6px solid var(--gold);
   border-radius: 6px;
   padding: 16px 18px;
   font-size: 1.08rem;
@@ -101,69 +136,67 @@ h2 {
   padding: 8px 14px; border: 0; background: transparent; color: var(--ink); cursor: pointer;
 }
 .seg button + button { border-left: 1px solid var(--line); }
-.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
-.seg button:hover:not([aria-pressed="true"]) { background: var(--accent-soft); }
+.seg button[aria-pressed="true"] { background: var(--seg-on-bg); color: var(--seg-on-ink); }
+.seg button:hover:not([aria-pressed="true"]) { background: var(--hover); }
 .copy {
   font: inherit; font-size: 0.92rem; font-weight: 500;
   padding: 8px 14px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--surface); color: var(--ink); cursor: pointer;
 }
-.copy:hover { background: var(--accent-soft); }
+.copy:hover { background: var(--hover); }
 .refresh {
-  font: inherit; font-size: 0.92rem; font-weight: 600;
-  padding: 8px 16px; border: 1px solid var(--accent); border-radius: 6px;
-  background: var(--accent); color: var(--accent-ink); cursor: pointer;
+  font: inherit; font-size: 0.92rem; font-weight: 700;
+  padding: 8px 18px; border: 1px solid #d9a50f; border-radius: 6px;
+  background: var(--gold); color: var(--brand); cursor: pointer;
 }
-.refresh:hover:not(:disabled) { filter: brightness(1.08); }
+.refresh:hover:not(:disabled) { filter: brightness(0.96); }
 .refresh:disabled { opacity: 0.65; cursor: progress; }
-button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
-.card { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--gold); border-radius: 6px; padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
 .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
-.big { font-family: var(--font-display); font-weight: 700; font-size: 2.6rem; line-height: 1; color: var(--accent); font-variant-numeric: tabular-nums; }
+.big { font-family: var(--font-display); font-weight: 700; font-size: 2.6rem; line-height: 1; color: var(--heading); font-variant-numeric: tabular-nums; }
 .label { color: var(--muted); font-size: 0.9rem; text-align: right; }
 ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 li { display: flex; flex-direction: column; gap: 2px; }
 .name { font-weight: 600; }
 .meta { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 0.88rem; color: var(--muted); font-variant-numeric: tabular-nums; }
-.pill { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-.pill.now { background: var(--accent); color: var(--accent-ink); }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--pill-bg); color: var(--pill-ink); font-weight: 600; }
+.pill.now { background: var(--gold); color: var(--brand); }
 .empty { color: var(--muted); font-size: 0.95rem; margin: 0; }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; align-items: start; }
 .main { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
 .side { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 16px; }
-.watch { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
-h3 {
-  margin: 0;
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 1.2rem;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
+.watch { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--gold); border-radius: 6px; padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 8px; }
 .watch .cap { margin: 0; color: var(--muted); font-size: 0.85rem; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-th { text-align: left; font-size: 0.8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 0; border-bottom: 2px solid var(--line); }
+th { text-align: left; font-size: 0.8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 0; border-bottom: 2px solid var(--gold); }
 td { padding: 7px 0; border-bottom: 1px solid var(--line); }
 tr:last-child td { border-bottom: 0; }
 th.num, td.num { text-align: right; padding-left: 12px; }
-td.num { font-weight: 600; }
+td.num { font-weight: 700; color: var(--heading); }
+footer { color: var(--muted); font-size: 0.85rem; display: flex; flex-direction: column; gap: 6px; }
+footer p { margin: 0; }
 @media (max-width: 860px) {
   .layout { grid-template-columns: minmax(0, 1fr); }
   .side { position: static; order: -1; }
 }
-footer { color: var(--muted); font-size: 0.85rem; display: flex; flex-direction: column; gap: 6px; }
-footer p { margin: 0; }
-@media (max-width: 420px) { h1 { font-size: 1.8rem; } .big { font-size: 2.2rem; } }
+@media (max-width: 520px) { .logo { height: 68px; } h1 { font-size: 1.8rem; } .big { font-size: 2.2rem; } }
 @media (prefers-reduced-motion: no-preference) { .seg button, .copy { transition: background 0.12s; } }
 </style>
 </head>
 <body>
+<header class="masthead">
+  <div class="masthead-in">
+    <img class="logo" src="logo.png" width="96" height="97" alt="Parramatta Cheetahs Cricket Club crest">
+    <div class="masthead-text">
+      <h1>Cheetahs Milestone Watch</h1>
+      <p class="sub">Parramatta Cheetahs Cricket Club, all seasons, all teams. <span id="status">Loading the latest data…</span> Source: <a href="https://play.cricket.com.au/stats?cat=battingAvgs&amp;orgId=4059f1b9-86d8-eb11-a7ad-2818780da0cc">Play Cricket club statistics</a>.</p>
+    </div>
+  </div>
+</header>
+
 <div class="wrap">
-  <header>
-    <h1>Cheetahs Milestone Watch</h1>
-    <p class="sub">Parramatta Cheetahs Cricket Club, all seasons, all teams. <span id="status">Loading the latest data…</span> Source: <a href="https://play.cricket.com.au/stats?cat=battingAvgs&amp;orgId=4059f1b9-86d8-eb11-a7ad-2818780da0cc">Play Cricket club statistics</a>.</p>
-  </header>
 
   <div class="toolbar">
     <div class="actions"><button type="button" class="refresh" id="refresh">Refresh</button><button type="button" class="copy" id="copy">Copy list</button></div>
@@ -200,7 +233,7 @@ footer p { margin: 0; }
     <h2 id="h-watch">Watchlist</h2>
     <div class="watch">
       <h3>Matches</h3>
-      <p class="cap">Within 5 matches of a milestone</p>
+      <p class="cap">Within 3 matches of a milestone</p>
       <div id="watch-matches"></div>
     </div>
     <div class="watch">
@@ -227,12 +260,13 @@ const SNAPSHOT = {"asOf":"2026-11-13T00:35:32Z","players":[{"n":"Soans, Gladson"
 const MILESTONES = [100, 150, 200, 250];
 const W_MILESTONES = [100, 150, 200, 250, 300];
 const W_MARGIN = 40; /* only players within 40 wickets above a milestone can have crossed it in a 4-week period */
-const WATCH_RANGE = 5; /* watchlist: within 5 matches or 5 wickets below a milestone */
+const WATCH_RANGE = 5;       /* wickets watchlist: 5 wickets below a milestone or fewer */
+const MATCH_WATCH_RANGE = 3; /* matches watchlist: 3 matches below a milestone or fewer (97, 98, 99 and so on) */
 
-/* Watchlists: players on 95 to 99 (145 to 149, ...) matches or wickets, most advanced first. */
-function watchlist(items, milestones, getName, getCount) {
+/* Watchlists: players within `range` below a milestone (for 3: 97 to 99, 147 to 149, ...), most advanced first. */
+function watchlist(items, milestones, getName, getCount, range) {
   return items
-    .filter(p => milestones.some(M => getCount(p) >= M - WATCH_RANGE && getCount(p) <= M - 1))
+    .filter(p => milestones.some(M => getCount(p) >= M - range && getCount(p) <= M - 1))
     .map(p => ({ name: displayName(getName(p)), count: getCount(p) }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
@@ -307,7 +341,7 @@ async function mapLimit(items, limit, fn) {
 /* api = { getBowlPage(offset), getSeasons(), getTeams(seasonId), getPerf(playerId, seasonId) } */
 async function buildWicketData(api, now, onTotals) {
   const bowlers = await loadBowlers(api.getBowlPage);
-  const watch = watchlist(bowlers, W_MILESTONES, p => p.n, p => p.w);
+  const watch = watchlist(bowlers, W_MILESTONES, p => p.n, p => p.w, WATCH_RANGE);
   if (onTotals) onTotals(watch);
   const cands = bowlers.filter(p => W_MILESTONES.some(M => p.w >= M && p.w <= M + W_MARGIN));
   const seasons = (await api.getSeasons())
@@ -535,12 +569,12 @@ function watchTable(list, countLabel, emptyText) {
   return box;
 }
 function matchWatch() {
-  return watchlist(players, MILESTONES, p => p.n, p => p.m);
+  return watchlist(players, MILESTONES, p => p.n, p => p.m, MATCH_WATCH_RANGE);
 }
 function renderWatch() {
   const m = document.getElementById("watch-matches");
   m.innerHTML = "";
-  m.appendChild(watchTable(matchWatch(), "Matches", "Nobody within 5 matches of a milestone."));
+  m.appendChild(watchTable(matchWatch(), "Matches", "Nobody within 3 matches of a milestone."));
   const w = document.getElementById("watch-wickets");
   w.innerHTML = "";
   if (wWatch) w.appendChild(watchTable(wWatch, "Wickets", "Nobody within 5 wickets of a milestone."));
@@ -556,7 +590,7 @@ function setStatus(kind) {
   else el.innerHTML = '<span class="bad">Could not reach Play Cricket. Showing saved matches data from ' + fmtDate(asOf) + ". Press Refresh to try again.</span>";
 }
 function copyText() {
-  const out = ["Parramatta Cheetahs milestone watch (" + fmtDate(asOf) + ")", "", "WATCHLIST: matches (within 5 of a milestone)"];
+  const out = ["Parramatta Cheetahs milestone watch (" + fmtDate(asOf) + ")", "", "WATCHLIST: matches (within 3 of a milestone)"];
   const mw = matchWatch();
   if (!mw.length) out.push("  Nobody");
   for (const r of mw) out.push("  " + r.name + " " + r.count);
