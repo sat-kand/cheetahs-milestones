@@ -202,15 +202,17 @@ td.num { font-weight: 700; color: var(--heading); }
 .scores-title small { display: block; font-weight: 400; color: var(--muted); font-size: 0.8rem; }
 #s-note:empty { display: none; }
 .scores { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--gold); border-radius: 6px; }
-.srow { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 10px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.srow { padding: 7px 10px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; display: flex; flex-direction: column; gap: 1px; }
 .srow:last-child { border-bottom: 0; }
-.srow .g { font-family: var(--font-display); font-weight: 700; font-size: 1.05rem; color: var(--heading); line-height: 1.1; }
-.srow .lines { min-width: 0; font-size: 0.86rem; line-height: 1.3; }
-.srow .ln { display: flex; gap: 6px; justify-content: space-between; }
-.srow .ln .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
-.srow .ln.us .who { color: var(--ink); font-weight: 600; }
-.srow .ln .sc { white-space: nowrap; font-weight: 600; color: var(--heading); }
-.srow .ln .sc small { font-weight: 400; color: var(--muted); }
+.srow .l1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.srow .g { font-family: var(--font-display); font-weight: 700; font-size: 1.1rem; color: var(--heading); }
+.srow .sc { font-weight: 700; color: var(--heading); }
+.srow .sc small, .srow .l2 small { font-weight: 400; color: var(--muted); font-size: 0.8rem; }
+.srow .amp { color: var(--muted); font-weight: 400; }
+.srow .l1 .st { margin-left: auto; align-self: center; }
+.srow .l2 { font-size: 0.86rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 0 8px; align-items: baseline; }
+.srow .l2 .sc { font-weight: 600; color: var(--ink); }
+.srow .ytb { color: var(--muted); font-size: 0.86rem; }
 .st { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 8px; border-radius: 999px; background: var(--pill-bg); color: var(--pill-ink); white-space: nowrap; }
 .st.won { background: #1f7a3d; color: #fff; }
 .st.lost { background: #b3261e; color: #fff; }
@@ -787,48 +789,86 @@ function matchOutcome(m, us, them) {
   if (/abandon|wash|cancel|no result/i.test(m.resultText || "")) return "abandoned";
   return "finished";
 }
-function sideScore(t) {
-  if (!t) return { score: "", overs: "" };
-  const score = String(t.scoreText || "").trim();
+/* One team's innings as [{ score, overs }], leaving out an innings that has not started (0-0).
+   From the scorecard when there is one (it has overs for every innings); otherwise from the fixture's score text,
+   which only carries the overs of the first innings. */
+function inningsFromScorecard(sc, teamId) {
+  const num = v => Number(v) || 0;
+  return (sc.innings || []).filter(i => i.battingTeamId === teamId)
+    .sort((a, b) => num(a.inningsNumber) - num(b.inningsNumber))
+    .filter(i => num(i.runsScored) > 0 || num(i.numberOfWicketsFallen) > 0 || num(i.oversBowled) > 0)
+    .map(i => {
+      const allOut = /all out/i.test(i.inningsCloseType || "") || num(i.numberOfWicketsFallen) >= 10;
+      const score = allOut ? String(num(i.runsScored)) : num(i.numberOfWicketsFallen) + "-" + num(i.runsScored) + (i.isDeclared || /declar/i.test(i.inningsCloseType || "") ? "d" : "");
+      return { score, overs: num(i.oversBowled) ? String(i.oversBowled) : "" };
+    });
+}
+function inningsFromText(t) {
+  if (!t) return [];
+  const parts = String(t.scoreText || "").split("&").map(x => x.trim()).filter(x => x && x !== "0-0" && x !== "undefined");
   const ov = Number(t.oversBowled) || 0;
-  return { score, overs: score && ov ? String(t.oversBowled) : "" };
+  return parts.map((score, i) => ({ score, overs: i === 0 && ov ? String(t.oversBowled) : "" }));
+}
+/* "Senior B13" with team "Seniors B13(Gold)" becomes "Senior B13 Gold", so two teams in one grade can be told apart. */
+function teamLabel(t) {
+  const m = String(t.name || "").match(/\(([^)]+)\)\s*$/);
+  return gradeLabel(t) + (m ? " " + m[1].trim() : "");
 }
 /* The current round is the senior round that started most recently (today or earlier).
-   api adds getTeamMatchesFresh(teamId), which is not remembered between refreshes. */
+   api adds getTeamMatchesFresh(teamId) and getScorecardFresh(matchId), which are not remembered between refreshes. */
 async function buildScores(api, now) {
   const seasons = newestSeasons(await api.getSeasons(), now, 2);
   const today = ymdSydney(now);
   const rounds = new Map();
+  const ourTeams = new Set();
   let failedTeams = 0;
   for (const s of seasons) {
     const teams = (await api.getTeams(s.id)).filter(isSeniorTeam);
+    teams.forEach(t => ourTeams.add(t.id));
     await mapLimit(teams, 6, async t => {
       let list;
       try { list = await api.getTeamMatchesFresh(t.id); } catch (e) { failedTeams++; return; }
-      const grade = gradeLabel(t);
+      const grade = teamLabel(t);
       for (const m of list) {
-        if (m.matchType === "BYE" || !m.round) continue;
+        if (!m.round) continue;
+        const key = s.id + "|" + m.round.name;
+        const r = rounds.get(key) || { name: m.round.name, season: s.name, first: "", last: "", rows: new Map() };
+        rounds.set(key, r);
+        if (m.matchType === "BYE") {
+          r.rows.set("bye" + t.id, { id: "bye" + t.id, grade, rank: gradeRank(grade), outcome: "bye", us: [], them: { name: "", innings: [] } });
+          continue;
+        }
         const days = (m.matchSchedule || []).map(x => parseDate(x.startDateTime)).filter(d => !isNaN(d)).map(ymdSydney).sort();
         if (!days.length) continue;
-        const key = s.id + "|" + m.round.name;
-        const r = rounds.get(key) || { name: m.round.name, season: s.name, first: days[0], last: days[days.length - 1], rows: new Map() };
-        if (days[0] < r.first) r.first = days[0];
-        if (days[days.length - 1] > r.last) r.last = days[days.length - 1];
-        if (!r.rows.has(m.id)) { /* a match between two of our teams is listed once */
-          const us = (m.teams || []).find(x => x.id === t.id) || null;
-          const them = (m.teams || []).find(x => x.id !== t.id) || null;
-          const club = them && them.owningOrganisation && (them.owningOrganisation.name || them.owningOrganisation.shortName);
-          r.rows.set(m.id, { id: m.id, grade, rank: gradeRank(grade), us: sideScore(us), them: { name: (them && (club || them.displayName)) || "Opponent", ...sideScore(them) },
-            outcome: matchOutcome(m, us, them), start: days[0] });
-        }
-        rounds.set(key, r);
+        if (!r.first || days[0] < r.first) r.first = days[0];
+        if (!r.last || days[days.length - 1] > r.last) r.last = days[days.length - 1];
+        if (r.rows.has(m.id)) continue; /* a match between two of our teams is listed once */
+        const us = (m.teams || []).find(x => x.id === t.id) || null;
+        const them = (m.teams || []).find(x => x.id !== t.id) || null;
+        const club = them && them.owningOrganisation && (them.owningOrganisation.name || them.owningOrganisation.shortName);
+        const sameClub = them && ourTeams.has(them.id);
+        let outcome = matchOutcome(m, us, them);
+        if (outcome === "upcoming" && days[0] <= today) outcome = "pending"; /* should have started, nothing entered yet */
+        r.rows.set(m.id, { id: m.id, grade, rank: gradeRank(grade), outcome, usId: us && us.id, themId: them && them.id,
+          us: inningsFromText(us), them: { name: (them && ((sameClub ? "" : club) || them.displayName)) || "Opponent", innings: inningsFromText(them) } });
       }
     });
   }
-  const started = [...rounds.values()].filter(r => r.first <= today).sort((a, b) => b.first.localeCompare(a.first) || b.last.localeCompare(a.last));
+  const started = [...rounds.values()].filter(r => r.first && r.first <= today).sort((a, b) => b.first.localeCompare(a.first) || b.last.localeCompare(a.last));
   const round = started[0];
   if (!round) return { round: null, rows: [], failedTeams };
   const rows = [...round.rows.values()].sort((a, b) => a.rank - b.rank || a.grade.localeCompare(b.grade) || a.them.name.localeCompare(b.them.name));
+  /* the scorecard has the overs of every innings; keep the fixture figures if it cannot be read */
+  if (api.getScorecardFresh) {
+    await mapLimit(rows.filter(r => r.usId && r.outcome !== "upcoming" && r.outcome !== "pending"), 6, async r => {
+      try {
+        const sc = await api.getScorecardFresh(r.id);
+        if (!sc || !Array.isArray(sc.innings)) return;
+        r.us = inningsFromScorecard(sc, r.usId);
+        if (r.themId) r.them.innings = inningsFromScorecard(sc, r.themId);
+      } catch (e) { /* keep the fixture figures */ }
+    });
+  }
   return { round: { name: round.name, season: round.season, first: round.first, last: round.last }, rows, failedTeams };
 }
 
@@ -896,6 +936,15 @@ function makeApi() {
     getBatPage: statsPage("batting-statistics", "BattingAggregate:desc"),
     getSeasons: () => once("seasons", async () => (await getJSON("/fixturesladders/organisations/" + ORG + "/seasons?jsconfig=eccn%3Atrue")).seasons || []),
     getTeams: id => once("teams" + id, async () => (await getJSON("/fixturesladders/organisations/" + ORG + "/teams?seasonId=" + id + "&jsconfig=eccn%3Atrue")).teams || []),
+    getScorecardFresh: async id => {
+      for (let i = 0; i < 3; i++) {
+        try {
+          const sc = lowerKeys(await getJSON("/scores/matches/" + id + "?responseModifier=includeScorecard&_=" + Date.now() + i));
+          if (Array.isArray(sc.innings)) return sc;
+        } catch (e) { /* try again */ }
+      }
+      return null;
+    },
     getTeamMatchesFresh: async id => (await getJSON("/scores/teams/" + id + "/matches?jsconfig=eccn%3Atrue&_=" + Date.now())).matches || [],
     getTeamMatches: id => once("tm" + id, async () => (await getJSON("/scores/teams/" + id + "/matches?jsconfig=eccn%3Atrue")).matches || []),
     /* Play Cricket now and then answers without the scorecard, or with an error, so try a few times with a short pause. */
@@ -1355,11 +1404,17 @@ $("a-copy").addEventListener("click", async e => {
 
 /* ---- Scores tab ---- */
 let scores = { state: "idle", data: null, at: null };
-const OUTCOME_LABEL = { upcoming: "Upcoming", progress: "In progress", won: "Won", lost: "Lost", tied: "Tied", drawn: "Drawn", abandoned: "Abandoned", finished: "Completed" };
-function scoreCell(side) {
-  const sc = document.createElement("span"); sc.className = "sc";
-  sc.textContent = side.score || "–";
-  if (side.overs) { const o = document.createElement("small"); o.textContent = " (" + side.overs + " ov)"; sc.appendChild(o); }
+const OUTCOME_LABEL = { bye: "Bye", pending: "No score yet", upcoming: "Upcoming", progress: "In progress", won: "Won", lost: "Lost", tied: "Tied", drawn: "Drawn", abandoned: "Abandoned", finished: "Completed" };
+/* "117 (49.3 ov) & 7-222 (60 ov)", or "Yet to bat" */
+function inningsNode(list) {
+  const sc = document.createElement("span");
+  if (!list.length) { sc.className = "ytb"; sc.textContent = "Yet to bat"; return sc; }
+  sc.className = "sc";
+  list.forEach((inn, i) => {
+    if (i) { const amp = document.createElement("span"); amp.className = "amp"; amp.textContent = " & "; sc.appendChild(amp); }
+    sc.appendChild(document.createTextNode(inn.score));
+    if (inn.overs) { const o = document.createElement("small"); o.textContent = " (" + inn.overs + " ov)"; sc.appendChild(o); }
+  });
   return sc;
 }
 function renderScores() {
@@ -1381,17 +1436,21 @@ function renderScores() {
   list.hidden = !d.rows.length;
   for (const r of d.rows) {
     const row = document.createElement("div"); row.className = "srow";
-    const g = document.createElement("div"); g.className = "g"; g.textContent = shortGrade(r.grade);
-    const lines = document.createElement("div"); lines.className = "lines";
-    const a = document.createElement("div"); a.className = "ln us";
-    const aw = document.createElement("span"); aw.className = "who"; aw.textContent = "Cheetahs";
-    a.append(aw, scoreCell(r.us));
-    const b = document.createElement("div"); b.className = "ln";
-    const bw = document.createElement("span"); bw.className = "who"; bw.textContent = r.them.name;
-    b.append(bw, scoreCell(r.them));
-    lines.append(a, b);
+    const l1 = document.createElement("div"); l1.className = "l1";
+    const g = document.createElement("span"); g.className = "g"; g.textContent = shortGrade(r.grade);
+    l1.appendChild(g);
+    const noScores = r.outcome === "bye" || r.outcome === "upcoming" || r.outcome === "pending";
+    if (!noScores) l1.appendChild(inningsNode(r.us));
     const st = document.createElement("span"); st.className = "st " + r.outcome; st.textContent = OUTCOME_LABEL[r.outcome] || r.outcome;
-    row.append(g, lines, st);
+    l1.appendChild(st);
+    row.appendChild(l1);
+    if (r.outcome !== "bye") {
+      const l2 = document.createElement("div"); l2.className = "l2";
+      const who = document.createElement("span"); who.textContent = "vs " + r.them.name;
+      l2.appendChild(who);
+      if (!noScores) l2.appendChild(inningsNode(r.them.innings));
+      row.appendChild(l2);
+    }
     list.appendChild(row);
   }
 }
