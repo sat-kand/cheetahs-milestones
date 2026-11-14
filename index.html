@@ -196,11 +196,30 @@ td.num { font-weight: 700; color: var(--heading); }
 .issue .tag { display: inline-block; margin-right: 6px; padding: 0 7px; border-radius: 999px; background: var(--pill-bg); color: var(--pill-ink); font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
 .tabs { overflow-x: auto; }
 .tab { white-space: nowrap; }
+#panel-scores { gap: 10px; }
+.scores-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.scores-title { font-weight: 600; color: var(--heading); }
+.scores-title small { display: block; font-weight: 400; color: var(--muted); font-size: 0.8rem; }
+#s-note:empty { display: none; }
+.scores { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--gold); border-radius: 6px; }
+.srow { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 10px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.srow:last-child { border-bottom: 0; }
+.srow .g { font-family: var(--font-display); font-weight: 700; font-size: 1.05rem; color: var(--heading); line-height: 1.1; }
+.srow .lines { min-width: 0; font-size: 0.86rem; line-height: 1.3; }
+.srow .ln { display: flex; gap: 6px; justify-content: space-between; }
+.srow .ln .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.srow .ln.us .who { color: var(--ink); font-weight: 600; }
+.srow .ln .sc { white-space: nowrap; font-weight: 600; color: var(--heading); }
+.srow .ln .sc small { font-weight: 400; color: var(--muted); }
+.st { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 8px; border-radius: 999px; background: var(--pill-bg); color: var(--pill-ink); white-space: nowrap; }
+.st.won { background: #1f7a3d; color: #fff; }
+.st.lost { background: #b3261e; color: #fff; }
+.st.progress { background: var(--gold); color: var(--brand); }
 @media (max-width: 860px) {
   .layout { grid-template-columns: minmax(0, 1fr); }
   .side { position: static; order: -1; }
 }
-@media (max-width: 520px) { .logo { height: 68px; } h1 { font-size: 1.8rem; } .big { font-size: 2.2rem; } }
+@media (max-width: 520px) { .tab { padding: 8px 12px; font-size: 1rem; } .logo { height: 68px; } h1 { font-size: 1.8rem; } .big { font-size: 2.2rem; } }
 @media (prefers-reduced-motion: no-preference) { .seg button, .copy { transition: background 0.12s; } }
 </style>
 </head>
@@ -221,6 +240,7 @@ td.num { font-weight: 700; color: var(--heading); }
     <button type="button" class="tab" role="tab" id="tab-milestones" data-tab="milestones" aria-controls="panel-milestones" aria-selected="true">Milestones</button>
     <button type="button" class="tab" role="tab" id="tab-xii" data-tab="xii" aria-controls="panel-xii" aria-selected="false">Club XII</button>
     <button type="button" class="tab" role="tab" id="tab-audit" data-tab="audit" aria-controls="panel-audit" aria-selected="false">Scorecard Audit</button>
+    <button type="button" class="tab" role="tab" id="tab-scores" data-tab="scores" aria-controls="panel-scores" aria-selected="false">Scores</button>
   </div>
 
   <div class="panel" id="panel-milestones" role="tabpanel" aria-labelledby="tab-milestones">
@@ -301,6 +321,15 @@ td.num { font-weight: 700; color: var(--heading); }
       <div class="grid xii-grid" id="x-grid"></div>
     </section>
     </div>
+  <div class="panel" id="panel-scores" role="tabpanel" aria-labelledby="tab-scores" hidden>
+    <div class="scores-head">
+      <div class="scores-title" id="s-title">Loading the current round…</div>
+      <button type="button" class="refresh" id="s-refresh">Refresh</button>
+    </div>
+    <div id="s-note" class="bad"></div>
+    <div class="scores" id="s-list"></div>
+  </div>
+
   <div class="panel" id="panel-audit" role="tabpanel" aria-labelledby="tab-audit" hidden>
     <div class="toolbar">
       <div class="actions"><button type="button" class="refresh" id="a-refresh">Refresh</button><button type="button" class="copy" id="a-copy">Copy issues</button></div>
@@ -741,6 +770,68 @@ async function buildAudit(api, now) {
   return { round: { name: round.name, season: round.season, first: round.first, last: round.last, matches: round.matches.size }, teams, failedTeams };
 }
 
+/* ---- Scores: the senior round being played now ---- */
+const NOT_STARTED = new Set(["UPCOMING", "PENDING", "SCHEDULED", "DRAFT", "POSTPONED"]);
+/* Result of one fixture for our team: "upcoming", "progress", "won", "lost", "tied", "drawn" or another word from Play Cricket. */
+function matchOutcome(m, us, them) {
+  const status = String(m.status || "").toUpperCase();
+  if (NOT_STARTED.has(status)) return "upcoming";
+  if (status !== "COMPLETED") return "progress"; /* stumps, live, innings break and so on */
+  if (us && us.isWinner) return "won";
+  if (them && them.isWinner) return "lost";
+  const code = String((us && us.resultTypeCode) || "").toUpperCase();
+  if (code === "W") return "won";
+  if (code === "L") return "lost";
+  if (code === "T" || /\btie/i.test(m.resultText || "")) return "tied";
+  if (code === "D" || /\bdraw/i.test(m.resultText || "")) return "drawn";
+  if (/abandon|wash|cancel|no result/i.test(m.resultText || "")) return "abandoned";
+  return "finished";
+}
+function sideScore(t) {
+  if (!t) return { score: "", overs: "" };
+  const score = String(t.scoreText || "").trim();
+  const ov = Number(t.oversBowled) || 0;
+  return { score, overs: score && ov ? String(t.oversBowled) : "" };
+}
+/* The current round is the senior round that started most recently (today or earlier).
+   api adds getTeamMatchesFresh(teamId), which is not remembered between refreshes. */
+async function buildScores(api, now) {
+  const seasons = newestSeasons(await api.getSeasons(), now, 2);
+  const today = ymdSydney(now);
+  const rounds = new Map();
+  let failedTeams = 0;
+  for (const s of seasons) {
+    const teams = (await api.getTeams(s.id)).filter(isSeniorTeam);
+    await mapLimit(teams, 6, async t => {
+      let list;
+      try { list = await api.getTeamMatchesFresh(t.id); } catch (e) { failedTeams++; return; }
+      const grade = gradeLabel(t);
+      for (const m of list) {
+        if (m.matchType === "BYE" || !m.round) continue;
+        const days = (m.matchSchedule || []).map(x => parseDate(x.startDateTime)).filter(d => !isNaN(d)).map(ymdSydney).sort();
+        if (!days.length) continue;
+        const key = s.id + "|" + m.round.name;
+        const r = rounds.get(key) || { name: m.round.name, season: s.name, first: days[0], last: days[days.length - 1], rows: new Map() };
+        if (days[0] < r.first) r.first = days[0];
+        if (days[days.length - 1] > r.last) r.last = days[days.length - 1];
+        if (!r.rows.has(m.id)) { /* a match between two of our teams is listed once */
+          const us = (m.teams || []).find(x => x.id === t.id) || null;
+          const them = (m.teams || []).find(x => x.id !== t.id) || null;
+          const club = them && them.owningOrganisation && (them.owningOrganisation.name || them.owningOrganisation.shortName);
+          r.rows.set(m.id, { id: m.id, grade, rank: gradeRank(grade), us: sideScore(us), them: { name: (them && (club || them.displayName)) || "Opponent", ...sideScore(them) },
+            outcome: matchOutcome(m, us, them), start: days[0] });
+        }
+        rounds.set(key, r);
+      }
+    });
+  }
+  const started = [...rounds.values()].filter(r => r.first <= today).sort((a, b) => b.first.localeCompare(a.first) || b.last.localeCompare(a.last));
+  const round = started[0];
+  if (!round) return { round: null, rows: [], failedTeams };
+  const rows = [...round.rows.values()].sort((a, b) => a.rank - b.rank || a.grade.localeCompare(b.grade) || a.them.name.localeCompare(b.them.name));
+  return { round: { name: round.name, season: round.season, first: round.first, last: round.last }, rows, failedTeams };
+}
+
 /* api = { getMatchesPage(offset), getBowlPage(offset), getBatPage(offset), getSeasons(), getTeams(seasonId), getPerf(playerId, seasonId), getMatch(matchId) } */
 async function buildCrossData(api, now, cfg, onTotals) {
   const totals = await loadTotals(api[cfg.page], cfg);
@@ -805,6 +896,7 @@ function makeApi() {
     getBatPage: statsPage("batting-statistics", "BattingAggregate:desc"),
     getSeasons: () => once("seasons", async () => (await getJSON("/fixturesladders/organisations/" + ORG + "/seasons?jsconfig=eccn%3Atrue")).seasons || []),
     getTeams: id => once("teams" + id, async () => (await getJSON("/fixturesladders/organisations/" + ORG + "/teams?seasonId=" + id + "&jsconfig=eccn%3Atrue")).teams || []),
+    getTeamMatchesFresh: async id => (await getJSON("/scores/teams/" + id + "/matches?jsconfig=eccn%3Atrue&_=" + Date.now())).matches || [],
     getTeamMatches: id => once("tm" + id, async () => (await getJSON("/scores/teams/" + id + "/matches?jsconfig=eccn%3Atrue")).matches || []),
     /* Play Cricket now and then answers without the scorecard, or with an error, so try a few times with a short pause. */
     getScorecard: id => once("sc" + id, async () => {
@@ -1260,14 +1352,77 @@ $("a-copy").addEventListener("click", async e => {
   setTimeout(() => { btn.textContent = "Copy issues"; }, 2000);
 });
 
-/* ---- tabs: Club XII and the audit are refreshed every time they are opened ---- */
+
+/* ---- Scores tab ---- */
+let scores = { state: "idle", data: null, at: null };
+const OUTCOME_LABEL = { upcoming: "Upcoming", progress: "In progress", won: "Won", lost: "Lost", tied: "Tied", drawn: "Drawn", abandoned: "Abandoned", finished: "Completed" };
+function scoreCell(side) {
+  const sc = document.createElement("span"); sc.className = "sc";
+  sc.textContent = side.score || "–";
+  if (side.overs) { const o = document.createElement("small"); o.textContent = " (" + side.overs + " ov)"; sc.appendChild(o); }
+  return sc;
+}
+function renderScores() {
+  const title = $("s-title"), list = $("s-list"), note = $("s-note");
+  list.innerHTML = ""; note.textContent = "";
+  if (scores.state === "loading" && !scores.data) { title.textContent = "Loading the current round…"; list.hidden = true; return; }
+  if (scores.state === "error" && !scores.data) { title.textContent = "Scores"; note.textContent = "Could not load scores from Play Cricket. Press Refresh to try again."; list.hidden = true; return; }
+  const d = scores.data;
+  if (!d.round) {
+    title.textContent = "Scores"; list.hidden = true;
+    note.textContent = d.failedTeams ? "Could not read the fixtures. Press Refresh to try again." : "";
+    if (!d.failedTeams) title.textContent = "No senior round has started yet.";
+    return;
+  }
+  title.textContent = d.round.name + " · " + xiiRounds(d.round);
+  const small = document.createElement("small"); small.textContent = "Updated " + fmtDate(scores.at); title.appendChild(small);
+  if (scores.state === "error") note.textContent = "Could not refresh. Press Refresh to try again.";
+  else if (d.failedTeams) note.textContent = "Could not read " + plural(d.failedTeams, "team", "teams") + ", so some matches may be missing. Press Refresh to try again.";
+  list.hidden = !d.rows.length;
+  for (const r of d.rows) {
+    const row = document.createElement("div"); row.className = "srow";
+    const g = document.createElement("div"); g.className = "g"; g.textContent = shortGrade(r.grade);
+    const lines = document.createElement("div"); lines.className = "lines";
+    const a = document.createElement("div"); a.className = "ln us";
+    const aw = document.createElement("span"); aw.className = "who"; aw.textContent = "Cheetahs";
+    a.append(aw, scoreCell(r.us));
+    const b = document.createElement("div"); b.className = "ln";
+    const bw = document.createElement("span"); bw.className = "who"; bw.textContent = r.them.name;
+    b.append(bw, scoreCell(r.them));
+    lines.append(a, b);
+    const st = document.createElement("span"); st.className = "st " + r.outcome; st.textContent = OUTCOME_LABEL[r.outcome] || r.outcome;
+    row.append(g, lines, st);
+    list.appendChild(row);
+  }
+}
+let scoresRun = 0;
+async function loadScores() {
+  const run = ++scoresRun;
+  const btn = $("s-refresh");
+  btn.disabled = true; btn.textContent = "Refreshing…";
+  scores.state = "loading"; renderScores();
+  try {
+    const data = await buildScores(makeApi(), new Date());
+    if (run !== scoresRun) return;
+    scores = { state: "ok", data, at: new Date().toISOString() };
+  } catch (e) {
+    if (run !== scoresRun) return;
+    scores.state = "error";
+  } finally {
+    if (run === scoresRun) { renderScores(); btn.disabled = false; btn.textContent = "Refresh"; }
+  }
+}
+$("s-refresh").addEventListener("click", loadScores);
+
+/* ---- tabs: every tab except Milestones is refreshed each time it is opened ---- */
 let milestonesLoaded = false;
 function showTab(name, updateHash) {
   for (const t of document.querySelectorAll(".tab")) t.setAttribute("aria-selected", String(t.dataset.tab === name));
-  for (const n of ["milestones", "xii", "audit"]) $("panel-" + n).hidden = name !== n;
-  if (updateHash) history.replaceState(null, "", name === "xii" ? "#club-xii" : name === "audit" ? "#audit" : location.pathname + location.search);
+  for (const n of ["milestones", "xii", "audit", "scores"]) $("panel-" + n).hidden = name !== n;
+  if (updateHash) history.replaceState(null, "", name === "xii" ? "#club-xii" : name === "audit" ? "#audit" : name === "scores" ? "#scores" : location.pathname + location.search);
   if (name === "xii") loadXII();
   else if (name === "audit") loadAudit();
+  else if (name === "scores") loadScores();
   else if (!milestonesLoaded) { milestonesLoaded = true; refresh(); }
 }
 document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => showTab(t.dataset.tab, true)));
@@ -1278,7 +1433,7 @@ document.querySelector(".tabs").addEventListener("keydown", e => {
   next.focus(); showTab(next.dataset.tab, true);
 });
 sections.forEach(renderSection); renderWatch();
-showTab(location.hash === "#club-xii" ? "xii" : location.hash === "#audit" ? "audit" : "milestones", false);
+showTab(location.hash === "#club-xii" ? "xii" : location.hash === "#audit" ? "audit" : location.hash === "#scores" ? "scores" : "milestones", false);
 </script>
 </body>
 </html>
