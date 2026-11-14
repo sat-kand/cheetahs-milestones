@@ -2033,8 +2033,8 @@ function renderRecords() {
       const det = document.createElement("span"); det.className = "det";
       if (e.det) {
         det.textContent = e.det;
-      } else if (careerKey && careerStats) {
-        det.textContent = careerDet[careerKey](e.stats || {});
+      } else if (careerKey) {
+        det.textContent = careerStats ? careerDet[careerKey](e.stats || {}) : ""; /* junior totals carry no extra figures */
       } else {
         const scores = e.who ? "" : (r.us || "–") + " v " + (r.them || "–") + " · ";
         det.appendChild(document.createTextNode(shortGrade(r.grade) + " v " + r.opponent + ", " + fmtDate3(r.date) + " · " + scores));
