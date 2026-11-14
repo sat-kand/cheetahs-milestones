@@ -1002,10 +1002,12 @@ function clubRecords(rows) {
 async function buildRecords(api) {
   const seasons = await api.getSeasons();
   const rows = new Map();
+  const seniorBySeason = new Map();
   let failed = 0;
   await mapLimit(seasons, 3, async s => {
     let teams;
     try { teams = (await api.getTeams(s.id)).filter(isSeniorTeam); } catch (e) { failed++; return; }
+    seniorBySeason.set(s.id, new Map(teams.map(t => [t.id, teamLabel(t)])));
     await mapLimit(teams, 4, async t => {
       let list;
       try { list = await api.getTeamMatches(t.id); } catch (e) { failed++; return; }
@@ -1022,7 +1024,110 @@ async function buildRecords(api) {
   });
   const all = [...rows.values()];
   const dates = all.map(r => r.date).filter(Boolean).sort();
-  return { matches: all.length, first: dates[0] || "", last: dates[dates.length - 1] || "", failed, records: clubRecords(all) };
+  const records = clubRecords(all);
+  const [bat, bowl] = await Promise.all([individualBests(api, "bat", seasons, seniorBySeason), individualBests(api, "bowl", seasons, seniorBySeason)]);
+  records.batting = bat;
+  records.bowling = bowl;
+  return { matches: all.length, first: dates[0] || "", last: dates[dates.length - 1] || "", failed, records };
+}
+
+/* ---- Individual bests: highest score and best bowling in an innings ---- */
+/* The club's season statistics give each player's best for a season, but they count junior matches too and do not say
+   which match it was. So they are used only to pick candidates, in order, and each candidate's own match history is
+   then read to find their best innings in a senior club match. Verification stops once the tenth confirmed record is
+   already better than the best any remaining candidate could claim. */
+function matchStartDay(m) {
+  const first = (m.matchSchedule || []).map(x => x.startDateTime).filter(Boolean)[0] || m.startDateTime;
+  const d = parseDate(first);
+  return isNaN(d) ? "" : ymdSydney(d);
+}
+function battingBest(m) {
+  let best = null;
+  for (const b of (m.battingStatistics || [])) {
+    const v = { runs: Number(b.runsScored) || 0, notOut: Number(b.dismissalTypeId) === 1 };
+    if (!best || batRank(v) > batRank(best)) best = v;
+  }
+  return best;
+}
+function bowlingBest(m) {
+  let best = null;
+  for (const b of (m.bowlingStatistics || [])) {
+    const v = { wickets: Number(b.wicketsTaken) || 0, conceded: Number(b.runsConceded) || 0 };
+    if (!best || bowlRank(v) > bowlRank(best)) best = v;
+  }
+  return best;
+}
+function batRank(v) { return v ? v.runs * 2 + (v.notOut ? 1 : 0) : -1; }
+function bowlRank(v) { return v ? v.wickets * 1000 - v.conceded : -1; }
+function batShow(v) { return v.runs + (v.notOut ? "*" : ""); }
+function bowlShow(v) { return v.wickets + "-" + v.conceded; }
+/* "9-52" as written by Play Cricket; it sorts these as text, so 10-127 lands below 9-52 and the order is rebuilt here. */
+function parseBestInnings(text) {
+  const m = String(text == null ? "" : text).match(/^(\d+)\s*-\s*(\d+)/);
+  return m ? { wickets: Number(m[1]), conceded: Number(m[2]) } : null;
+}
+const BEST_KINDS = {
+  bat: { lists: [["batting-statistics", "BattingHighScore:desc"]], rank: batRank, show: batShow, best: battingBest, counts: v => v.runs > 0,
+    claim: st => st.battingHighScore == null ? null : { runs: Number(st.battingHighScore), notOut: !!st.isBattingHSNotOut } },
+  bowl: { lists: [["bowling-statistics", "BowlingBestInnings:desc"], ["bowling-statistics", "Bowling5WIs:desc"]], rank: bowlRank, show: bowlShow, best: bowlingBest, counts: v => v.wickets > 0,
+    claim: st => parseBestInnings(st.bowlingBestInnings) }
+};
+/* One candidate: find their best innings for a club senior team that season, and confirm they were on the club's side. */
+async function verifyBest(api, kind, c, teamMap) {
+  const K = BEST_KINDS[kind];
+  let perf;
+  try { perf = await api.getPerf(c.id, c.seasonId); } catch (e) { return null; }
+  const list = (Array.isArray(perf) ? perf : [])
+    .filter(m => (m.teams || []).some(t => teamMap.has(t.id)))
+    .map(m => ({ m, v: K.best(m) }))
+    .filter(x => x.v && K.counts(x.v))
+    .sort((a, b) => K.rank(b.v) - K.rank(a.v));
+  for (const x of list.slice(0, 3)) { /* their best may have been played against us, so walk down */
+    let side = null;
+    try { side = await clubSideOf(api, c.id, x.m, teamMap); } catch (e) { return null; }
+    if (!side) continue;
+    let opponent = "";
+    try {
+      const d = lowerKeys(await api.getMatch(x.m.id));
+      const them = (d.teams || []).find(t => t.id !== side);
+      if (them) opponent = shortClub(them.owningOrganisation && them.owningOrganisation.name) || them.displayName || "";
+    } catch (e) { /* name the opponent from the fixture instead */ }
+    if (!opponent) {
+      const them = (x.m.teams || []).find(t => t.id !== side);
+      opponent = (them && them.displayName) || "Opponent";
+    }
+    return { value: K.rank(x.v), show: K.show(x.v), who: c.name,
+      row: { id: x.m.id, grade: teamMap.get(side) || (x.m.grade && x.m.grade.name) || "", date: matchStartDay(x.m), opponent, us: "", them: "" } };
+  }
+  return null;
+}
+async function individualBests(api, kind, seasons, seniorBySeason) {
+  const K = BEST_KINDS[kind];
+  const cands = new Map();
+  await mapLimit(seasons, 4, async s => {
+    if (!(seniorBySeason.get(s.id) || new Map()).size) return;
+    for (const [path, sort] of K.lists) {
+      let rows = [];
+      try { rows = await api.getStatsPage(path, sort, s.id, 25); } catch (e) { continue; }
+      for (const p of rows) {
+        const claim = K.claim(p.statistics || {});
+        if (!claim) continue;
+        const key = p.id + "|" + s.id;
+        const prev = cands.get(key);
+        if (!prev || K.rank(claim) > prev.claim) cands.set(key, { id: p.id, name: displayName(tidyName(p.name)), seasonId: s.id, claim: K.rank(claim) });
+      }
+    }
+  });
+  const queue = [...cands.values()].sort((a, b) => b.claim - a.claim);
+  const found = [];
+  for (let i = 0; i < queue.length; i += 8) {
+    if (found.length >= RECORDS_TOP && found[RECORDS_TOP - 1].value >= queue[i].claim) break;
+    const batch = queue.slice(i, i + 8);
+    const got = await mapLimit(batch, 6, c => verifyBest(api, kind, c, seniorBySeason.get(c.seasonId) || new Map()));
+    for (const g of got) if (g) found.push(g);
+    found.sort((a, b) => b.value - a.value || String(b.row.date).localeCompare(String(a.row.date)));
+  }
+  return found.slice(0, RECORDS_TOP);
 }
 
 /* api = { getMatchesPage(offset), getBowlPage(offset), getBatPage(offset), getSeasons(), getTeams(seasonId), getPerf(playerId, seasonId), getMatch(matchId) } */
@@ -1084,6 +1189,10 @@ function makeApi() {
     return (await getJSON("/participants/organisations/" + ORG + "/" + kind + "?" + q.toString())).participants || [];
   };
   return {
+    getStatsPage: (kind, sort, seasonId, limit) => once("sp" + kind + sort + seasonId + limit, async () => {
+      const q = new URLSearchParams({ offset: "1", limit: String(limit || 25), sort: sort, seasonId: seasonId, jsconfig: "eccn:true" });
+      return (await getJSON("/participants/organisations/" + ORG + "/" + kind + "?" + q.toString())).participants || [];
+    }),
     getMatchesPage: statsPage("batting-statistics", "Matches:desc"),
     getBowlPage: statsPage("bowling-statistics", "BowlingWickets:desc"),
     getBatPage: statsPage("batting-statistics", "BattingAggregate:desc"),
@@ -1680,19 +1789,22 @@ function renderRecords() {
   sum.innerHTML = "From <strong>" + fmtNum(d.matches) + " completed senior matches</strong> in Play Cricket, " + fmtDate3(d.first) + " to " + fmtDate3(d.last) + ".";
   if (d.failed) sum.innerHTML += '<span class="bad">Could not read ' + plural(d.failed, "team or season", "teams or seasons") + ", so some matches may be missing. Press Refresh to try again.</span>";
   if (records.state === "error") sum.innerHTML += '<span class="bad">Could not refresh. Press Refresh to try again.</span>';
-  const groups = [["Highest score chased", d.records.chases], ["Highest team total", d.records.totals], ["Biggest win by runs", d.records.runs], ["Biggest innings win", d.records.innings]];
+  const groups = [["Highest individual score", d.records.batting], ["Best bowling in an innings", d.records.bowling],
+                  ["Highest score chased", d.records.chases], ["Highest team total", d.records.totals],
+                  ["Biggest win by runs", d.records.runs], ["Biggest innings win", d.records.innings]];
   for (const [title, list] of groups) {
     const card = document.createElement("section"); card.className = "card"; card.setAttribute("aria-label", title);
     const h = document.createElement("h3"); h.textContent = title; card.appendChild(h);
-    if (!list.length) { const p = document.createElement("p"); p.className = "empty"; p.textContent = "None recorded."; card.appendChild(p); }
+    if (!list || !list.length) { const p = document.createElement("p"); p.className = "empty"; p.textContent = "None recorded."; card.appendChild(p); }
     const ul = document.createElement("ul");
-    list.forEach((e, i) => {
+    (list || []).forEach((e, i) => {
       const r = e.row;
       const li = document.createElement("li"); li.className = "rec";
       const no = document.createElement("span"); no.className = "no"; no.textContent = (i + 1) + ".";
-      const val = document.createElement("span"); val.className = "val"; val.textContent = e.show;
+      const val = document.createElement("span"); val.className = "val"; val.textContent = e.show + (e.who ? " — " + e.who : "");
       const det = document.createElement("span"); det.className = "det";
-      det.appendChild(document.createTextNode(shortGrade(r.grade) + " v " + r.opponent + ", " + fmtDate3(r.date) + " · " + (r.us || "–") + " v " + (r.them || "–") + " · "));
+      const scores = e.who ? "" : (r.us || "–") + " v " + (r.them || "–") + " · ";
+      det.appendChild(document.createTextNode(shortGrade(r.grade) + " v " + r.opponent + ", " + fmtDate3(r.date) + " · " + scores));
       const a = document.createElement("a"); a.href = "https://play.cricket.com.au/match/" + encodeURIComponent(r.id) + "?tab=scorecard"; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Scorecard";
       det.appendChild(a);
       li.append(no, val, det);
