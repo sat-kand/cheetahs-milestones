@@ -205,7 +205,7 @@ td.num { font-weight: 700; color: var(--heading); }
 .srow { padding: 7px 10px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; display: flex; flex-direction: column; gap: 2px; }
 .srow:last-child { border-bottom: 0; }
 .srow .l1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
-.srow .side { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 7px; position: static; flex-direction: row; top: auto; }
+.srow .tm { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 7px; }
 .srow .g { font-family: var(--font-display); font-weight: 700; font-size: 1.1rem; color: var(--heading); }
 .srow .sc { font-weight: 700; color: var(--heading); }
 .srow .sc small { font-weight: 400; color: var(--muted); font-size: 0.8rem; }
@@ -1450,14 +1450,14 @@ function renderScores() {
     const row = document.createElement("div"); row.className = "srow";
     const noScores = r.outcome === "bye" || r.outcome === "upcoming" || r.outcome === "pending";
     const l1 = document.createElement("div"); l1.className = "l1";
-    const mine = document.createElement("span"); mine.className = "side";
+    const mine = document.createElement("span"); mine.className = "tm";
     const g = document.createElement("span"); g.className = "g"; g.textContent = shortGrade(r.grade);
     mine.appendChild(g);
     if (!noScores) mine.appendChild(inningsNode(r.us));
     l1.appendChild(mine);
     if (r.outcome !== "bye") {
       const vs = document.createElement("span"); vs.className = "vs"; vs.textContent = "vs";
-      const theirs = document.createElement("span"); theirs.className = "side";
+      const theirs = document.createElement("span"); theirs.className = "tm";
       const who = document.createElement("span"); who.className = "g"; who.textContent = r.them.name;
       theirs.appendChild(who);
       if (!noScores) theirs.appendChild(inningsNode(r.them.innings));
