@@ -341,8 +341,8 @@ td.num { font-weight: 700; color: var(--heading); }
     </div>
     <section class="block" aria-labelledby="h-xii">
       <h2 id="h-xii">Senior Club XII of the round</h2>
-      <p class="blurb">The best senior performers of the club's last completed round: the top six run scorers, the wicketkeeper with the most dismissals and the top five wicket takers.</p>
-      <div class="summary" id="x-summary">Loading the last completed round…</div>
+      <p class="blurb">The best senior performers of the club's most recently played round: the top six run scorers, the wicketkeeper with the most dismissals and the top five wicket takers.</p>
+      <div class="summary" id="x-summary">Loading the most recently played round…</div>
       <div class="grid xii-grid" id="x-grid"></div>
     </section>
     </div>
@@ -395,8 +395,8 @@ td.num { font-weight: 700; color: var(--heading); }
     </div>
     <section class="block" aria-labelledby="h-audit">
       <h2 id="h-audit">Senior scorecard audit</h2>
-      <p class="blurb">Checks each senior team's scorecard for the club's last completed round: batting and bowling totals add up, every catch, stumping and run out is credited to a fielder, and no player's name is hidden.</p>
-      <div class="summary" id="a-summary">Loading the last completed round…</div>
+      <p class="blurb">Checks each senior team's scorecard for the club's most recently played round: that it's finalised in Play Cricket, batting and bowling totals add up, every catch, stumping and run out is credited to a fielder, and no player's name is hidden.</p>
+      <div class="summary" id="a-summary">Loading the most recently played round…</div>
       <div class="grid xii-grid" id="a-grid"></div>
     </section>
   </div>
@@ -626,8 +626,10 @@ function selectXII(players) {
   const captain = team.sort((a, b) => contribution(b) - contribution(a) || a.rank - b.rank || b.wkts - a.wkts || byName(a, b))[0] || null;
   return { batters, keeper, keeperBasis, bowlers, captain };
 }
-/* Find the club's last completed senior round and build the XII from it.
-   A round is complete when none of its senior matches (in any grade) is still to be played or in progress.
+/* Find the club's most recently played senior round and build the XII from it.
+   A round counts once its matches' scheduled dates have arrived, even if a team's scorecard
+   (in any grade) is still live, pending or at stumps; round.matches carries each match's status
+   so callers can flag or skip whichever teams aren't finished yet.
    api adds getTeamMatches(teamId) -> the team's fixtures with round, status and schedule. */
 async function findLastRound(api, now) {
   const seasons = newestSeasons(await api.getSeasons(), now, 2);
@@ -651,12 +653,12 @@ async function findLastRound(api, now) {
       }
     });
   }
-  const done = [...rounds.values()].filter(r => r.matches.size && [...r.matches.values()].every(m => !NOT_FINISHED.has(m.status)))
+  const played = [...rounds.values()].filter(r => r.matches.size)
     .map(r => ({ ...r, first: [...r.matches.values()].map(m => m.first).filter(Boolean).sort()[0] || "", last: [...r.matches.values()].map(m => m.last).filter(Boolean).sort().pop() || "" }))
     .filter(r => r.last && r.last <= today)
     .sort((a, b) => b.last.localeCompare(a.last));
-  if (failedTeams || !done.length) return { round: null, failedTeams, teamIds };
-  return { round: done[0], failedTeams, teamIds };
+  if (failedTeams || !played.length) return { round: null, failedTeams, teamIds };
+  return { round: played[0], failedTeams, teamIds };
 }
 async function buildClubXII(api, now) {
   const { round, failedTeams, teamIds } = await findLastRound(api, now);
@@ -799,12 +801,22 @@ function auditTeam(sc, clubTeamId) {
   }
   return issues;
 }
-/* Audit every senior team's scorecard for the last completed round. api adds getScorecard(matchId). */
+/* A readable version of a Play Cricket match status, for the "not final" audit flag. */
+function statusLabel(s) {
+  const words = { IN_PROGRESS: "in progress", INPROGRESS: "in progress" };
+  return words[s] || String(s || "").toLowerCase().replace(/_/g, " ");
+}
+/* Audit every senior team's scorecard for the most recently played round. A team whose match is
+   still live, pending or at stumps gets a "status" issue added on top of the usual checks, since
+   the scorecard can still change before the match is finalised. api adds getScorecard(matchId). */
 async function buildAudit(api, now) {
   const { round, failedTeams, teamIds } = await findLastRound(api, now);
   if (!round) return { round: null, failedTeams };
   const teams = [];
   await mapLimit([...round.matches.keys()], 4, async id => {
+    const status = (round.matches.get(id) || {}).status;
+    const notFinal = NOT_FINISHED.has(status);
+    const statusIssue = () => notFinal ? [{ type: "status", text: "Still shown as \"" + statusLabel(status) + "\" in Play Cricket, not finalised — these figures can still change." }] : [];
     let sc = null;
     try { sc = await api.getScorecard(id); } catch (e) { sc = null; }
     if (!sc || !Array.isArray(sc.innings)) {
@@ -815,14 +827,15 @@ async function buildAudit(api, now) {
         const us = (d.teams || []).find(t => teamIds.has(t.id)), them = (d.teams || []).find(t => !teamIds.has(t.id));
         if (us) label = { grade: teamIds.get(us.id), name: us.displayName || us.name, opponent: them ? them.displayName || them.name : "" };
       } catch (e) { /* keep the generic label */ }
-      teams.push({ matchId: id, ...label, rank: gradeRank(label.grade), loaded: false, issues: [] });
+      /* a scorecard that genuinely isn't finalised yet gets the status flag instead of "could not be read" */
+      teams.push({ matchId: id, ...label, rank: gradeRank(label.grade), loaded: notFinal, issues: statusIssue() });
       return;
     }
     for (const t of (sc.teams || [])) {
       if (!teamIds.has(t.id)) continue;
       const them = (sc.teams || []).find(x => x.id !== t.id);
       const grade = teamIds.get(t.id);
-      teams.push({ matchId: id, grade, name: t.displayName || t.name, opponent: them ? them.displayName || them.name : "", rank: gradeRank(grade), loaded: true, issues: auditTeam(sc, t.id) });
+      teams.push({ matchId: id, grade, name: t.displayName || t.name, opponent: them ? them.displayName || them.name : "", rank: gradeRank(grade), loaded: true, issues: [...statusIssue(), ...auditTeam(sc, t.id)] });
     }
   });
   teams.sort((a, b) => a.rank - b.rank || String(a.name).localeCompare(String(b.name)));
@@ -1661,7 +1674,7 @@ function xiiRounds(r) {
 function renderXII() {
   const sum = $("x-summary"), grid = $("x-grid");
   grid.innerHTML = "";
-  if (xii.state === "loading" && !xii.data) { sum.textContent = "Loading the last completed round…"; return; }
+  if (xii.state === "loading" && !xii.data) { sum.textContent = "Loading the most recently played round…"; return; }
   if (xii.state === "error" && !xii.data) {
     sum.innerHTML = '<span class="bad" style="margin:0">Could not load the round from Play Cricket. Press Refresh to try again.</span>';
     return;
@@ -1669,8 +1682,8 @@ function renderXII() {
   const d = xii.data;
   if (!d.round) {
     sum.innerHTML = d.failedTeams
-      ? '<span class="bad" style="margin:0">Could not read the fixtures for ' + plural(d.failedTeams, "team", "teams") + ", so the last completed round cannot be worked out. Press Refresh to try again.</span>"
-      : "<strong>No senior round has been completed yet.</strong>";
+      ? '<span class="bad" style="margin:0">Could not read the fixtures for ' + plural(d.failedTeams, "team", "teams") + ", so the most recently played round cannot be worked out. Press Refresh to try again.</span>"
+      : "<strong>No senior round has been played yet.</strong>";
     return;
   }
   const r = d.round;
@@ -1719,7 +1732,7 @@ function renderXII() {
 }
 function xiiText() {
   const d = xii.data;
-  if (!d || !d.round) return "Parramatta Cheetahs Senior Club XII: no completed round yet.";
+  if (!d || !d.round) return "Parramatta Cheetahs Senior Club XII: no round played yet.";
   const out = ["Parramatta Cheetahs Senior Club XII - " + d.round.name + " (" + xiiRounds(d.round) + ")", ""];
   let k = 0;
   const cap = p => p.name + (d.xii.captain && d.xii.captain.id === p.id ? " (C)" : "");
@@ -1756,13 +1769,13 @@ $("x-copy").addEventListener("click", async e => {
 
 /* ---- Scorecard audit tab ---- */
 let audit = { state: "idle", data: null, at: null };
-const ISSUE_ORDER = ["batting", "bowling", "fielding", "names"];
-const ISSUE_LABEL = { batting: "Batting", bowling: "Bowling", fielding: "Fielding", names: "Names" };
+const ISSUE_ORDER = ["status", "batting", "bowling", "fielding", "names"];
+const ISSUE_LABEL = { status: "Not final", batting: "Batting", bowling: "Bowling", fielding: "Fielding", names: "Names" };
 function sortedIssues(t) { return [...t.issues].sort((a, b) => ISSUE_ORDER.indexOf(a.type) - ISSUE_ORDER.indexOf(b.type)); }
 function renderAudit() {
   const sum = $("a-summary"), grid = $("a-grid");
   grid.innerHTML = "";
-  if (audit.state === "loading" && !audit.data) { sum.textContent = "Loading the last completed round…"; return; }
+  if (audit.state === "loading" && !audit.data) { sum.textContent = "Loading the most recently played round…"; return; }
   if (audit.state === "error" && !audit.data) {
     sum.innerHTML = '<span class="bad" style="margin:0">Could not load the round from Play Cricket. Press Refresh to try again.</span>';
     return;
@@ -1770,8 +1783,8 @@ function renderAudit() {
   const d = audit.data;
   if (!d.round) {
     sum.innerHTML = d.failedTeams
-      ? '<span class="bad" style="margin:0">Could not read the fixtures for ' + plural(d.failedTeams, "team", "teams") + ", so the last completed round cannot be worked out. Press Refresh to try again.</span>"
-      : "<strong>No senior round has been completed yet.</strong>";
+      ? '<span class="bad" style="margin:0">Could not read the fixtures for ' + plural(d.failedTeams, "team", "teams") + ", so the most recently played round cannot be worked out. Press Refresh to try again.</span>"
+      : "<strong>No senior round has been played yet.</strong>";
     return;
   }
   const bad = d.teams.filter(t => t.issues.length), total = d.teams.reduce((a, t) => a + t.issues.length, 0), unread = d.teams.filter(t => !t.loaded);
@@ -1815,7 +1828,7 @@ function renderAudit() {
 }
 function auditText() {
   const d = audit.data;
-  if (!d || !d.round) return "Parramatta Cheetahs senior scorecard audit: no completed round yet.";
+  if (!d || !d.round) return "Parramatta Cheetahs senior scorecard audit: no round played yet.";
   const out = ["Parramatta Cheetahs senior scorecard audit - " + d.round.name + " (" + xiiRounds(d.round) + ")"];
   for (const t of d.teams) {
     if (t.loaded && !t.issues.length) continue;
