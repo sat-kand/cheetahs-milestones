@@ -365,7 +365,11 @@ td.num { font-weight: 700; color: var(--heading); }
   </div>
 
   <div class="panel" id="panel-records" role="tabpanel" aria-labelledby="tab-records" hidden>
-    <section class="honours" aria-labelledby="h-hon">
+    <div class="seg" id="seg-records" role="group" aria-label="Senior or junior records">
+      <button type="button" data-view="senior" aria-pressed="true">Senior</button>
+      <button type="button" data-view="junior" aria-pressed="false">Junior</button>
+    </div>
+    <section class="honours" id="honours" aria-labelledby="h-hon">
       <div class="hon-head">
         <span class="hon-count" id="hon-count">0</span>
         <div>
@@ -380,7 +384,7 @@ td.num { font-weight: 700; color: var(--heading); }
     </div>
     <section class="block" aria-labelledby="h-records">
       <h2 id="h-records">Senior club records</h2>
-      <div class="summary" id="rec-summary">Loading every senior match…</div>
+      <div class="summary" id="rec-summary" hidden></div>
       <div class="grid rec-grid" id="rec-grid"></div>
     </section>
   </div>
@@ -1175,6 +1179,19 @@ async function verifyBest(api, kind, c, teamMap) {
   }
   return null;
 }
+/* Walk the candidates best-first, confirming each against the player's own matches, and stop once the tenth confirmed
+   record beats anything the rest could claim. mapFor(seasonId) gives that season's club teams. */
+async function verifyTop(api, kind, queue, mapFor) {
+  const found = [];
+  for (let i = 0; i < queue.length; i += 8) {
+    if (found.length >= RECORDS_TOP && found[RECORDS_TOP - 1].value >= queue[i].claim) break;
+    const batch = queue.slice(i, i + 8);
+    const got = await mapLimit(batch, 6, c => verifyBest(api, kind, c, mapFor(c.seasonId) || new Map()));
+    for (const g of got) if (g) found.push(g);
+    found.sort((a, b) => b.value - a.value || String(b.row.date).localeCompare(String(a.row.date)));
+  }
+  return found.slice(0, RECORDS_TOP);
+}
 async function individualBests(api, kind, seasons, seniorBySeason) {
   const K = BEST_KINDS[kind];
   const cands = new Map();
@@ -1193,15 +1210,7 @@ async function individualBests(api, kind, seasons, seniorBySeason) {
     }
   });
   const queue = [...cands.values()].sort((a, b) => b.claim - a.claim);
-  const found = [];
-  for (let i = 0; i < queue.length; i += 8) {
-    if (found.length >= RECORDS_TOP && found[RECORDS_TOP - 1].value >= queue[i].claim) break;
-    const batch = queue.slice(i, i + 8);
-    const got = await mapLimit(batch, 6, c => verifyBest(api, kind, c, seniorBySeason.get(c.seasonId) || new Map()));
-    for (const g of got) if (g) found.push(g);
-    found.sort((a, b) => b.value - a.value || String(b.row.date).localeCompare(String(a.row.date)));
-  }
-  return found.slice(0, RECORDS_TOP);
+  return verifyTop(api, kind, queue, id => seniorBySeason.get(id));
 }
 
 /* ---- Career lists: most matches, runs, wickets and dismissals ----
@@ -1231,6 +1240,80 @@ async function careerLists(api) {
       .slice(0, RECORDS_TOP);
   });
   return out;
+}
+
+/* ---- Junior records ----
+   The club's career totals cover every grade at once, so for juniors each junior team's own statistics are read
+   season by season and added up. That also gives the candidates for the best individual innings. */
+async function buildJuniorRecords(api) {
+  const seasons = await api.getSeasons();
+  const rows = new Map();
+  const juniorBySeason = new Map();
+  const career = new Map();
+  const cands = { bat: [], bowl: [] };
+  let failed = 0;
+  const add = (id, name, field, n) => {
+    const e = career.get(id) || { who: displayName(tidyName(name)), matches: 0, runs: 0, wickets: 0, dismissals: 0 };
+    e[field] += n;
+    career.set(id, e);
+  };
+  await mapLimit(seasons, 2, async s => {
+    let teams;
+    try { teams = (await api.getTeams(s.id)).filter(isJuniorTeam); } catch (e) { failed++; return; }
+    if (!teams.length) return;
+    juniorBySeason.set(s.id, new Map(teams.map(t => [t.id, juniorLabel(t)])));
+    await mapLimit(teams, 4, async t => {
+      try {
+        for (const m of await api.getTeamMatches(t.id)) {
+          if (m.matchType === "BYE" || String(m.status).toUpperCase() !== "COMPLETED") continue;
+          const us = (m.teams || []).find(x => x.id === t.id), them = (m.teams || []).find(x => x.id !== t.id);
+          if (!us || !them) continue;
+          const days = (m.matchSchedule || []).map(x => parseDate(x.startDateTime)).filter(d => !isNaN(d)).map(ymdSydney).sort();
+          const club = them.owningOrganisation && (them.owningOrganisation.name || them.owningOrganisation.shortName);
+          const sameClub = (juniorBySeason.get(s.id) || new Map()).has(them.id);
+          rows.set(m.id + "|" + t.id, { id: m.id, teamId: t.id, grade: juniorLabel(t), season: s.name, date: days[0] || "", won: !!us.isWinner,
+            result: m.resultText || "", us: us.scoreText, them: them.scoreText, opponent: (sameClub ? "" : shortClub(club)) || them.displayName || "Opponent" });
+        }
+      } catch (e) { failed++; }
+      const get = (kind, sort) => api.getStatsPage(kind, sort, s.id, 50, t.id).catch(() => []);
+      const [bat, bowl, field] = await Promise.all([
+        get("batting-statistics", "BattingAggregate:desc"), get("bowling-statistics", "BowlingWickets:desc"), get("fielding-statistics", "FieldingCatchesNonWK:desc")
+      ]);
+      for (const p of bat) {
+        const st = p.statistics || {};
+        add(p.id, p.name, "matches", Number(st.matches) || 0);
+        add(p.id, p.name, "runs", Number(st.battingAggregate) || 0);
+        const claim = BEST_KINDS.bat.claim(st);
+        if (claim) cands.bat.push({ id: p.id, name: displayName(tidyName(p.name)), seasonId: s.id, claim: batRank(claim) });
+      }
+      for (const p of bowl) {
+        const st = p.statistics || {};
+        add(p.id, p.name, "wickets", Number(st.bowlingWickets) || 0);
+        const claim = BEST_KINDS.bowl.claim(st);
+        if (claim) cands.bowl.push({ id: p.id, name: displayName(tidyName(p.name)), seasonId: s.id, claim: bowlRank(claim) });
+      }
+      for (const p of field) {
+        const st = p.statistics || {};
+        add(p.id, p.name, "dismissals", (Number(st.fieldingTotalCatches) || 0) + (Number(st.fieldingStumpings) || 0) + (Number(st.fieldingRunOuts) || 0));
+      }
+    });
+  });
+  const all = [...rows.values()];
+  const dates = all.map(r => r.date).filter(Boolean).sort();
+  const records = clubRecords(all);
+  const top = field => [...career.entries()].map(([id, e]) => ({ who: e.who, value: e[field] }))
+    .filter(e => e.value > 0).sort((a, b) => b.value - a.value || a.who.localeCompare(b.who)).slice(0, RECORDS_TOP);
+  records.career = { matches: top("matches"), runs: top("runs"), wickets: top("wickets"), dismissals: top("dismissals") };
+  const dedupe = list => {
+    const best = new Map();
+    for (const c of list) { const k = c.id + "|" + c.seasonId; if (!best.has(k) || c.claim > best.get(k).claim) best.set(k, c); }
+    return [...best.values()].sort((a, b) => b.claim - a.claim);
+  };
+  const mapFor = id => juniorBySeason.get(id);
+  const [bat, bowl] = await Promise.all([verifyTop(api, "bat", dedupe(cands.bat), mapFor), verifyTop(api, "bowl", dedupe(cands.bowl), mapFor)]);
+  records.batting = bat;
+  records.bowling = bowl;
+  return { matches: all.length, first: dates[0] || "", last: dates[dates.length - 1] || "", failed, records };
 }
 
 /* api = { getMatchesPage(offset), getBowlPage(offset), getBatPage(offset), getSeasons(), getTeams(seasonId), getPerf(playerId, seasonId), getMatch(matchId) } */
@@ -1292,9 +1375,10 @@ function makeApi() {
     return (await getJSON("/participants/organisations/" + ORG + "/" + kind + "?" + q.toString())).participants || [];
   };
   return {
-    getStatsPage: (kind, sort, seasonId, limit) => once("sp" + kind + sort + seasonId + limit, async () => {
+    getStatsPage: (kind, sort, seasonId, limit, teamId) => once("sp" + kind + sort + seasonId + limit + (teamId || ""), async () => {
       const q = new URLSearchParams({ offset: "1", limit: String(limit || 25), sort: sort, jsconfig: "eccn:true" });
       if (seasonId) q.set("seasonId", seasonId); /* no season means the whole of the club's history */
+      if (teamId) q.set("teamId", teamId);
       return (await getJSON("/participants/organisations/" + ORG + "/" + kind + "?" + q.toString())).participants || [];
     }),
     getMatchesPage: statsPage("batting-statistics", "Matches:desc"),
@@ -1895,23 +1979,30 @@ function renderHonours() {
 renderHonours();
 
 /* ---- Records tab: loaded the first time it is opened, then only on Refresh (it reads every season) ---- */
-let records = { state: "idle", data: null };
+const recViews = { senior: { state: "idle", data: null }, junior: { state: "idle", data: null } };
+let recView = "senior";
 function fmtDate3(ymd) {
   if (!ymd) return "";
   const d = new Date(ymd + "T12:00:00Z");
   return new Intl.DateTimeFormat("en-AU", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" }).format(d);
 }
 function renderRecords() {
+  const records = recViews[recView];
+  const junior = recView === "junior";
   const sum = $("rec-summary"), grid = $("rec-grid");
   grid.innerHTML = "";
-  if (records.state === "loading" && !records.data) { sum.textContent = "Loading every senior match…"; return; }
-  if (records.state === "error" && !records.data) { sum.innerHTML = '<span class="bad" style="margin:0">Could not load the match history from Play Cricket. Press Refresh to try again.</span>'; return; }
+  $("h-records").textContent = junior ? "Junior club records" : "Senior club records";
+  $("honours").hidden = junior;
+  const say = html => { sum.innerHTML = html; sum.hidden = !html; };
+  if (records.state === "loading" && !records.data) { say("Loading every " + (junior ? "junior" : "senior") + " match…"); return; }
+  if (records.state === "error" && !records.data) { say('<span class="bad" style="margin:0">Could not load the match history from Play Cricket. Press Refresh to try again.</span>'); return; }
   const d = records.data;
-  sum.innerHTML = "From <strong>" + fmtNum(d.matches) + " completed senior matches</strong> in Play Cricket, " + fmtDate3(d.first) + " to " + fmtDate3(d.last) + ".";
-  sum.innerHTML += " Career lists cover every club match, junior matches included.";
-  if (d.failed) sum.innerHTML += '<span class="bad">Could not read ' + plural(d.failed, "team or season", "teams or seasons") + ", so some matches may be missing. Press Refresh to try again.</span>";
-  if (records.state === "error") sum.innerHTML += '<span class="bad">Could not refresh. Press Refresh to try again.</span>';
+  let note = "";
+  if (d.failed) note += '<span class="bad" style="margin:0">Could not read ' + plural(d.failed, "team or season", "teams or seasons") + ", so some matches may be missing. Press Refresh to try again.</span>";
+  if (records.state === "error") note += '<span class="bad" style="margin:0">Could not refresh. Press Refresh to try again.</span>';
+  say(note);
   const career = d.records.career || {};
+  const careerStats = !junior; /* junior career lists are summed here, with no extra statistics to show */
   const num = v => Number(v) || 0;
   const join = parts => parts.filter(Boolean).join(" · ");
   const careerDet = {
@@ -1921,10 +2012,11 @@ function renderRecords() {
     dismissals: st => join([plural(num(st.fieldingTotalCatches), "catch", "catches"), num(st.fieldingStumpings) ? plural(num(st.fieldingStumpings), "stumping", "stumpings") : "", num(st.fieldingRunOuts) ? plural(num(st.fieldingRunOuts), "run out", "run outs") : ""])
   };
   const groups = [["Most matches", career.matches, "matches"], ["Most runs", career.runs, "runs"],
-                  ["Most wickets", career.wickets, "wickets"], ["Most dismissals", career.dismissals, "dismissals"], ["Most premierships", premiershipList()],
-                  ["Highest individual score", d.records.batting], ["Best bowling in an innings", d.records.bowling],
-                  ["Highest team total", d.records.totals], ["Highest score chased", d.records.chases],
-                  ["Biggest win by runs", d.records.runs], ["Biggest innings win", d.records.innings]];
+                  ["Most wickets", career.wickets, "wickets"], ["Most dismissals", career.dismissals, "dismissals"]]
+    .concat(junior ? [] : [["Most premierships", premiershipList()]]) /* the juniors have no titles yet */
+    .concat([["Highest individual score", d.records.batting], ["Best bowling in an innings", d.records.bowling],
+             ["Highest team total", d.records.totals], ["Highest score chased", d.records.chases],
+             ["Biggest win by runs", d.records.runs], ["Biggest innings win", d.records.innings]]);
   for (const [title, list, careerKey] of groups) {
     const card = document.createElement("section"); card.className = "card"; card.setAttribute("aria-label", title);
     const h = document.createElement("h3"); h.textContent = title; card.appendChild(h);
@@ -1938,7 +2030,7 @@ function renderRecords() {
       const det = document.createElement("span"); det.className = "det";
       if (e.det) {
         det.textContent = e.det;
-      } else if (careerKey) {
+      } else if (careerKey && careerStats) {
         det.textContent = careerDet[careerKey](e.stats || {});
       } else {
         const scores = e.who ? "" : (r.us || "–") + " v " + (r.them || "–") + " · ";
@@ -1955,23 +2047,31 @@ function renderRecords() {
   }
 }
 let recordsRun = 0;
-async function loadRecords() {
+async function loadRecords(view) {
+  const which = view || recView;
   const run = ++recordsRun;
   const btn = $("rec-refresh");
   btn.disabled = true; btn.textContent = "Refreshing…";
-  records.state = "loading"; renderRecords();
+  recViews[which].state = "loading";
+  if (which === recView) renderRecords();
   try {
-    const data = await buildRecords(makeApi());
+    const data = await (which === "junior" ? buildJuniorRecords(makeApi()) : buildRecords(makeApi()));
     if (run !== recordsRun) return;
-    records = { state: "ok", data };
+    recViews[which] = { state: "ok", data };
   } catch (e) {
     if (run !== recordsRun) return;
-    records.state = "error";
+    recViews[which].state = "error";
   } finally {
-    if (run === recordsRun) { renderRecords(); btn.disabled = false; btn.textContent = "Refresh"; }
+    if (run === recordsRun) { if (which === recView) renderRecords(); btn.disabled = false; btn.textContent = "Refresh"; }
   }
 }
-$("rec-refresh").addEventListener("click", loadRecords);
+$("rec-refresh").addEventListener("click", () => loadRecords());
+document.querySelectorAll("#seg-records button").forEach(b => b.addEventListener("click", () => {
+  recView = b.dataset.view;
+  document.querySelectorAll("#seg-records button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  renderRecords();
+  if (recViews[recView].state === "idle") loadRecords();
+}));
 
 /* ---- tabs: every tab except Milestones is refreshed each time it is opened ---- */
 let milestonesLoaded = false;
@@ -1983,7 +2083,7 @@ function showTab(name, updateHash) {
   else if (name === "audit") loadAudit();
   else if (name === "scores") seniorScores.load();
   else if (name === "jscores") juniorScores.load();
-  else if (name === "records") { if (records.state === "idle") loadRecords(); }
+  else if (name === "records") { if (recViews[recView].state === "idle") loadRecords(); }
   else if (name === "milestones" && !milestonesLoaded) { milestonesLoaded = true; refresh(); }
 }
 document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => showTab(t.dataset.tab, true)));
