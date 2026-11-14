@@ -202,7 +202,6 @@ td.num { font-weight: 700; color: var(--heading); }
 .hon .s { font-size: 0.76rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--on-brand-muted); }
 .hon .g { font-family: var(--font-display); font-weight: 700; font-size: 1.3rem; line-height: 1.15; color: #fff; }
 .hon .c { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; color: var(--gold); }
-.hon-extra { border-top: 1px solid rgba(255, 255, 255, 0.16); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 @media (max-width: 520px) { .hon-count { font-size: 2.8rem; } .hon-grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); } }
 .rec-grid h3 { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
 .rec { display: grid; grid-template-columns: 1.6em minmax(0, 1fr); gap: 0 6px; }
@@ -370,12 +369,11 @@ td.num { font-weight: 700; color: var(--heading); }
       <div class="hon-head">
         <span class="hon-count" id="hon-count">0</span>
         <div>
-          <h3 id="h-hon">Premierships</h3>
-          <p class="hon-sub">Grand finals won by the club</p>
+          <h3 id="h-hon">Championships</h3>
+          <p class="hon-sub">Premierships and consolation championships</p>
         </div>
       </div>
       <div class="hon-grid" id="hon-grid"></div>
-      <div class="hon-extra" id="hon-extra"></div>
     </section>
     <div class="toolbar">
       <div class="actions"><button type="button" class="refresh" id="rec-refresh">Refresh</button></div>
@@ -988,11 +986,14 @@ async function buildScores(api, now, kind) {
 }
 
 /* ---- Honour roll ----
-   Kept by hand, because four of these grand finals were washed out or abandoned and the premiership went to the minor
-   premier, which Play Cricket does not record. Newest first; `on` is only for ordering. */
+   The club's premierships and consolation championships. This is the one list on the Records tab kept by hand, because
+   four of these grand finals were washed out or abandoned and the premiership went to the minor premier, which Play
+   Cricket does not record; every other list is read from Play Cricket. Newest first; `on` is only for ordering. */
 const HONOURS = [
   { on: "2026-08", season: "Winter 2026", comp: "SMCA", grade: "15th Division" },
+  { on: "2026-08", season: "Winter 2026", comp: "SMCA", grade: "Consolation 3rd Division" },
   { on: "2026-03", season: "2025-26", comp: "PDCA", grade: "B1" },
+  { on: "2025-09", season: "Winter 2025", comp: "SMCA", grade: "Consolation 4th Division" },
   { on: "2025-03", season: "2024-25", comp: "PDCA", grade: "B3" },
   { on: "2025-03", season: "2024-25", comp: "PDCA", grade: "B11" },
   { on: "2024-12", season: "Spring 2024", comp: "PDCA", grade: "T20" },
@@ -1009,10 +1010,6 @@ const HONOURS = [
   { on: "2018-08", season: "Winter 2018", comp: "SMCA", grade: "12th Division" },
   { on: "2016-03", season: "2015-16", comp: "PDCA", grade: "B6" },
   { on: "2016-03", season: "2015-16", comp: "NDCA", grade: "5th Grade" }
-];
-const CONSOLATIONS = [
-  { on: "2026-08", season: "Winter 2026", comp: "SMCA", grade: "Consolation 3rd Division" },
-  { on: "2025-09", season: "Winter 2025", comp: "SMCA", grade: "Consolation 4th Division" }
 ];
 function honourRoll(list) {
   return [...list].sort((a, b) => String(b.on).localeCompare(String(a.on)) || a.grade.localeCompare(b.grade));
@@ -1874,14 +1871,6 @@ function renderHonours() {
   const grid = $("hon-grid");
   grid.innerHTML = "";
   for (const h of honourRoll(HONOURS)) grid.appendChild(honourTile(h));
-  const extra = $("hon-extra");
-  extra.innerHTML = "";
-  if (!CONSOLATIONS.length) return;
-  const head = document.createElement("p"); head.className = "hon-sub";
-  head.textContent = CONSOLATIONS.length + " consolation " + (CONSOLATIONS.length === 1 ? "championship" : "championships");
-  const row = document.createElement("div"); row.className = "hon-grid";
-  for (const h of honourRoll(CONSOLATIONS)) row.appendChild(honourTile(h));
-  extra.append(head, row);
 }
 renderHonours();
 
