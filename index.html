@@ -196,11 +196,11 @@ td.num { font-weight: 700; color: var(--heading); }
 .issue .tag { display: inline-block; margin-right: 6px; padding: 0 7px; border-radius: 999px; background: var(--pill-bg); color: var(--pill-ink); font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
 .tabs { overflow-x: auto; }
 .tab { white-space: nowrap; }
-#panel-scores { gap: 10px; }
+.scores-panel { gap: 10px; }
 .scores-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .scores-title { font-weight: 600; color: var(--heading); }
 .scores-title small { display: block; font-weight: 400; color: var(--muted); font-size: 0.8rem; }
-#s-note:empty { display: none; }
+.snote:empty { display: none; }
 .scores { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--gold); border-radius: 6px; }
 .srow { padding: 7px 10px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; display: flex; flex-direction: column; gap: 2px; }
 .srow:last-child { border-bottom: 0; }
@@ -245,7 +245,8 @@ td.num { font-weight: 700; color: var(--heading); }
     <button type="button" class="tab" role="tab" id="tab-milestones" data-tab="milestones" aria-controls="panel-milestones" aria-selected="true">Milestones</button>
     <button type="button" class="tab" role="tab" id="tab-xii" data-tab="xii" aria-controls="panel-xii" aria-selected="false">Club XII</button>
     <button type="button" class="tab" role="tab" id="tab-audit" data-tab="audit" aria-controls="panel-audit" aria-selected="false">Scorecard Audit</button>
-    <button type="button" class="tab" role="tab" id="tab-scores" data-tab="scores" aria-controls="panel-scores" aria-selected="false">Scores</button>
+    <button type="button" class="tab" role="tab" id="tab-scores" data-tab="scores" aria-controls="panel-scores" aria-selected="false">Senior Scores</button>
+    <button type="button" class="tab" role="tab" id="tab-jscores" data-tab="jscores" aria-controls="panel-jscores" aria-selected="false">Junior Scores</button>
   </div>
 
   <div class="panel" id="panel-milestones" role="tabpanel" aria-labelledby="tab-milestones">
@@ -326,13 +327,22 @@ td.num { font-weight: 700; color: var(--heading); }
       <div class="grid xii-grid" id="x-grid"></div>
     </section>
     </div>
-  <div class="panel" id="panel-scores" role="tabpanel" aria-labelledby="tab-scores" hidden>
+  <div class="panel scores-panel" id="panel-scores" role="tabpanel" aria-labelledby="tab-scores" hidden>
     <div class="scores-head">
       <div class="scores-title" id="s-title">Loading the current round…</div>
       <div class="actions"><button type="button" class="refresh" id="s-refresh">Refresh</button><button type="button" class="copy" id="s-copy">Copy scores</button></div>
     </div>
-    <div id="s-note" class="bad"></div>
+    <div id="s-note" class="bad snote"></div>
     <div class="scores" id="s-list"></div>
+  </div>
+
+  <div class="panel scores-panel" id="panel-jscores" role="tabpanel" aria-labelledby="tab-jscores" hidden>
+    <div class="scores-head">
+      <div class="scores-title" id="j-title">Loading the current round…</div>
+      <div class="actions"><button type="button" class="refresh" id="j-refresh">Refresh</button><button type="button" class="copy" id="j-copy">Copy scores</button></div>
+    </div>
+    <div id="j-note" class="bad snote"></div>
+    <div class="scores" id="j-list"></div>
   </div>
 
   <div class="panel" id="panel-audit" role="tabpanel" aria-labelledby="tab-audit" hidden>
@@ -823,51 +833,101 @@ function teamLabel(t) {
   const m = String(t.name || "").match(/\(([^)]+)\)\s*$/);
   return gradeLabel(t) + (m ? " " + m[1].trim() : "");
 }
-/* The current round is the senior round that started most recently (today or earlier).
+/* Junior teams: everything that is neither a senior team nor the Sunday T20 side (boys' age groups and the girls' teams). */
+function isJuniorTeam(t) {
+  const text = [t.name, t.grade && t.grade.name].filter(Boolean).join(" ");
+  return !isSeniorTeam(t) && !/t20|twenty20/i.test(text);
+}
+/* "Juniors U10 Blue(Parveen)" becomes "U10 Blue": the team's own name without the coach in brackets. */
+function juniorLabel(t) {
+  const s = String(t.name || "").replace(/\([^)]*\)/g, " ").replace(/^juniors?\s+/i, "").replace(/\s+/g, " ").trim();
+  return s || gradeLabel(t);
+}
+/* Youngest age group first, girls' teams last. */
+function juniorRank(label) {
+  const m = String(label).match(/\bU\s?(\d{1,2})\b/i);
+  return (/girl/i.test(label) ? 100 : 0) + (m ? Number(m[1]) : 50);
+}
+const SCORE_KINDS = {
+  senior: { filter: isSeniorTeam, label: teamLabel, rank: gradeRank },
+  junior: { filter: isJuniorTeam, label: juniorLabel, rank: juniorRank }
+};
+function mondayOf(ymd) {
+  const d = new Date(ymd + "T12:00:00Z");
+  return addDays(ymd, -((d.getUTCDay() + 6) % 7));
+}
+/* Scores for the round being played now.
+   Seniors all play the same numbered round, so it is the round that started most recently (today or earlier).
+   Junior grades number their rounds separately, so it is each team's latest match in the most recent week of play,
+   plus any earlier match still running into that week.
    api adds getTeamMatchesFresh(teamId) and getScorecardFresh(matchId), which are not remembered between refreshes. */
-async function buildScores(api, now) {
+async function buildScores(api, now, kind) {
+  const K = SCORE_KINDS[kind || "senior"];
   const seasons = newestSeasons(await api.getSeasons(), now, 2);
   const today = ymdSydney(now);
-  const rounds = new Map();
+  const all = [], byes = [];
   const ourTeams = new Set();
   let failedTeams = 0;
   for (const s of seasons) {
-    const teams = (await api.getTeams(s.id)).filter(isSeniorTeam);
+    const teams = (await api.getTeams(s.id)).filter(K.filter);
     teams.forEach(t => ourTeams.add(t.id));
     await mapLimit(teams, 6, async t => {
       let list;
       try { list = await api.getTeamMatchesFresh(t.id); } catch (e) { failedTeams++; return; }
-      const grade = teamLabel(t);
+      const grade = K.label(t), rank = K.rank(grade);
       for (const m of list) {
         if (!m.round) continue;
-        const key = s.id + "|" + m.round.name;
-        const r = rounds.get(key) || { name: m.round.name, season: s.name, first: "", last: "", rows: new Map() };
-        rounds.set(key, r);
+        const base = { teamId: t.id, key: s.id + "|" + m.round.name, roundName: m.round.name, season: s.name };
         if (m.matchType === "BYE") {
-          r.rows.set("bye" + t.id, { id: "bye" + t.id, grade, rank: gradeRank(grade), outcome: "bye", us: [], them: { name: "", innings: [] } });
+          byes.push({ ...base, row: { id: "bye" + t.id, grade, rank, outcome: "bye", us: [], them: { name: "", innings: [] } } });
           continue;
         }
         const days = (m.matchSchedule || []).map(x => parseDate(x.startDateTime)).filter(d => !isNaN(d)).map(ymdSydney).sort();
         if (!days.length) continue;
-        if (!r.first || days[0] < r.first) r.first = days[0];
-        if (!r.last || days[days.length - 1] > r.last) r.last = days[days.length - 1];
-        const rowKey = m.id + "|" + t.id; /* a match between two of our teams gets a row for each of them */
         const us = (m.teams || []).find(x => x.id === t.id) || null;
         const them = (m.teams || []).find(x => x.id !== t.id) || null;
         const club = them && them.owningOrganisation && (them.owningOrganisation.name || them.owningOrganisation.shortName);
-        const sameClub = them && ourTeams.has(them.id);
         let outcome = matchOutcome(m, us, them);
         if (outcome === "upcoming" && days[0] <= today) outcome = "pending"; /* should have started, nothing entered yet */
         const venue = (m.venue && (m.venue.name || (m.venue.playingSurface && m.venue.playingSurface.name))) || "";
-        r.rows.set(rowKey, { id: m.id, venue: String(venue).trim(), grade, rank: gradeRank(grade), outcome, usId: us && us.id, themId: them && them.id,
-          us: inningsFromText(us), them: { name: (them && ((sameClub ? "" : shortClub(club)) || them.displayName)) || "Opponent", innings: inningsFromText(them) } });
+        /* a match between two of our teams gets a row for each of them */
+        all.push({ ...base, first: days[0], last: days[days.length - 1],
+          row: { id: m.id, venue: String(venue).trim(), grade, rank, outcome, usId: us && us.id, themId: them && them.id,
+            us: inningsFromText(us), them: { name: "", club, display: them && them.displayName, innings: inningsFromText(them) } } });
       }
     });
   }
-  const started = [...rounds.values()].filter(r => r.first && r.first <= today).sort((a, b) => b.first.localeCompare(a.first) || b.last.localeCompare(a.last));
-  const round = started[0];
-  if (!round) return { round: null, rows: [], failedTeams };
-  const rows = [...round.rows.values()].sort((a, b) => a.rank - b.rank || a.grade.localeCompare(b.grade) || a.them.name.localeCompare(b.them.name));
+  for (const e of all) {
+    const t = e.row.them;
+    t.name = (e.row.themId && ourTeams.has(e.row.themId) ? "" : shortClub(t.club)) || t.display || "Opponent";
+    delete t.club; delete t.display;
+  }
+  const started = all.filter(e => e.first <= today);
+  if (!started.length) return { round: null, rows: [], failedTeams };
+  let picked, name, season;
+  if (kind === "junior") {
+    const latest = started.map(e => e.first).sort().pop();
+    const week = mondayOf(latest);
+    const perTeam = new Map();
+    for (const e of started.filter(x => x.last >= week)) {
+      const cur = perTeam.get(e.teamId);
+      if (!cur || e.first > cur.first) perTeam.set(e.teamId, e);
+    }
+    picked = [...perTeam.values()];
+    const count = new Map();
+    picked.forEach(e => count.set(e.key, (count.get(e.key) || 0) + 1));
+    const topKey = [...count].sort((a, b) => b[1] - a[1])[0][0];
+    const top = picked.find(e => e.key === topKey);
+    name = count.size > 1 ? "This week" : top.roundName; season = top.season;
+    picked = picked.concat(byes.filter(x => count.has(x.key) && !perTeam.has(x.teamId)));
+  } else {
+    const newest = started.slice().sort((a, b) => b.first.localeCompare(a.first) || b.last.localeCompare(a.last))[0];
+    picked = all.filter(e => e.key === newest.key).concat(byes.filter(x => x.key === newest.key));
+    name = newest.roundName; season = newest.season;
+  }
+  const dated = picked.filter(e => e.first);
+  const round = { name, season, first: dated.map(e => e.first).sort()[0], last: dated.map(e => e.last).sort().pop() };
+  const rows = picked.map(e => e.row).sort((a, b) => a.rank - b.rank || a.grade.localeCompare(b.grade) || a.them.name.localeCompare(b.them.name));
   /* the scorecard has the overs of every innings; keep the fixture figures if it cannot be read */
   if (api.getScorecardFresh) {
     const cards = new Map(); /* one lookup per match, even when two of our teams share it */
@@ -881,7 +941,7 @@ async function buildScores(api, now) {
       } catch (e) { /* keep the fixture figures */ }
     });
   }
-  return { round: { name: round.name, season: round.season, first: round.first, last: round.last }, rows, failedTeams };
+  return { round, rows, failedTeams };
 }
 
 /* api = { getMatchesPage(offset), getBowlPage(offset), getBatPage(offset), getSeasons(), getTeams(seasonId), getPerf(playerId, seasonId), getMatch(matchId) } */
@@ -1414,8 +1474,7 @@ $("a-copy").addEventListener("click", async e => {
 });
 
 
-/* ---- Scores tab ---- */
-let scores = { state: "idle", data: null, at: null };
+/* ---- Scores tabs (seniors and juniors) ---- */
 const OUTCOME_LABEL = { bye: "Bye", pending: "No score yet", upcoming: "Upcoming", progress: "In progress", won: "Won", lost: "Lost", tied: "Tied", drawn: "Drawn", abandoned: "Abandoned", finished: "Completed" };
 /* "117 (49.3 ov) & 7-222 (60 ov)", or "Yet to bat" */
 function inningsNode(list) {
@@ -1429,104 +1488,110 @@ function inningsNode(list) {
   });
   return sc;
 }
-function renderScores() {
-  const title = $("s-title"), list = $("s-list"), note = $("s-note");
-  list.innerHTML = ""; note.textContent = "";
-  if (scores.state === "loading" && !scores.data) { title.textContent = "Loading the current round…"; list.hidden = true; return; }
-  if (scores.state === "error" && !scores.data) { title.textContent = "Scores"; note.textContent = "Could not load scores from Play Cricket. Press Refresh to try again."; list.hidden = true; return; }
-  const d = scores.data;
-  if (!d.round) {
-    title.textContent = "Scores"; list.hidden = true;
-    note.textContent = d.failedTeams ? "Could not read the fixtures. Press Refresh to try again." : "";
-    if (!d.failedTeams) title.textContent = "No senior round has started yet.";
-    return;
-  }
-  title.textContent = d.round.name + " · " + xiiRounds(d.round);
-  const small = document.createElement("small"); small.textContent = "Updated " + fmtDate(scores.at); title.appendChild(small);
-  if (scores.state === "error") note.textContent = "Could not refresh. Press Refresh to try again.";
-  else if (d.failedTeams) note.textContent = "Could not read " + plural(d.failedTeams, "team", "teams") + ", so some matches may be missing. Press Refresh to try again.";
-  list.hidden = !d.rows.length;
-  for (const r of d.rows) {
-    const row = document.createElement("div"); row.className = "srow";
-    const noScores = r.outcome === "bye" || r.outcome === "upcoming" || r.outcome === "pending";
-    const l1 = document.createElement("div"); l1.className = "l1";
-    const mine = document.createElement("span"); mine.className = "tm";
-    const g = document.createElement("span"); g.className = "g"; g.textContent = shortGrade(r.grade);
-    mine.appendChild(g);
-    if (!noScores) mine.appendChild(inningsNode(r.us));
-    l1.appendChild(mine);
-    if (r.outcome !== "bye") {
-      const vs = document.createElement("span"); vs.className = "vs"; vs.textContent = "vs";
-      const theirs = document.createElement("span"); theirs.className = "tm";
-      const who = document.createElement("span"); who.className = "g"; who.textContent = r.them.name;
-      theirs.appendChild(who);
-      if (!noScores) theirs.appendChild(inningsNode(r.them.innings));
-      l1.append(vs, theirs);
+function scoresTab(prefix, kind, word) {
+  let state = { state: "idle", data: null, at: null };
+  let runNo = 0;
+  function render() {
+    const title = $(prefix + "-title"), list = $(prefix + "-list"), note = $(prefix + "-note");
+    list.innerHTML = ""; note.textContent = "";
+    if (state.state === "loading" && !state.data) { title.textContent = "Loading the current round…"; list.hidden = true; return; }
+    if (state.state === "error" && !state.data) { title.textContent = word + " scores"; note.textContent = "Could not load scores from Play Cricket. Press Refresh to try again."; list.hidden = true; return; }
+    const d = state.data;
+    if (!d.round) {
+      list.hidden = true;
+      title.textContent = d.failedTeams ? word + " scores" : "No " + word.toLowerCase() + " round has started yet.";
+      note.textContent = d.failedTeams ? "Could not read the fixtures. Press Refresh to try again." : "";
+      return;
     }
-    row.appendChild(l1);
-    const l2 = document.createElement("div"); l2.className = "l2";
-    if (r.venue) {
-      const v = document.createElement("span"); v.className = "venue";
-      v.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>';
-      const vn = document.createElement("span"); vn.textContent = r.venue;
-      v.appendChild(vn);
-      l2.appendChild(v);
+    title.textContent = d.round.name + " · " + xiiRounds(d.round);
+    const small = document.createElement("small"); small.textContent = "Updated " + fmtDate(state.at); title.appendChild(small);
+    if (state.state === "error") note.textContent = "Could not refresh. Press Refresh to try again.";
+    else if (d.failedTeams) note.textContent = "Could not read " + plural(d.failedTeams, "team", "teams") + ", so some matches may be missing. Press Refresh to try again.";
+    list.hidden = !d.rows.length;
+    for (const r of d.rows) {
+      const row = document.createElement("div"); row.className = "srow";
+      const noScores = r.outcome === "bye" || r.outcome === "upcoming" || r.outcome === "pending";
+      const l1 = document.createElement("div"); l1.className = "l1";
+      const mine = document.createElement("span"); mine.className = "tm";
+      const g = document.createElement("span"); g.className = "g"; g.textContent = shortGrade(r.grade);
+      mine.appendChild(g);
+      if (!noScores) mine.appendChild(inningsNode(r.us));
+      l1.appendChild(mine);
+      if (r.outcome !== "bye") {
+        const vs = document.createElement("span"); vs.className = "vs"; vs.textContent = "vs";
+        const theirs = document.createElement("span"); theirs.className = "tm";
+        const who = document.createElement("span"); who.className = "g"; who.textContent = r.them.name;
+        theirs.appendChild(who);
+        if (!noScores) theirs.appendChild(inningsNode(r.them.innings));
+        l1.append(vs, theirs);
+      }
+      row.appendChild(l1);
+      const l2 = document.createElement("div"); l2.className = "l2";
+      if (r.venue) {
+        const v = document.createElement("span"); v.className = "venue";
+        v.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>';
+        const vn = document.createElement("span"); vn.textContent = r.venue;
+        v.appendChild(vn);
+        l2.appendChild(v);
+      }
+      const st = document.createElement("span"); st.className = "st " + r.outcome; st.textContent = OUTCOME_LABEL[r.outcome] || r.outcome;
+      l2.appendChild(st);
+      row.appendChild(l2);
+      list.appendChild(row);
     }
-    const st = document.createElement("span"); st.className = "st " + r.outcome; st.textContent = OUTCOME_LABEL[r.outcome] || r.outcome;
-    l2.appendChild(st);
-    row.appendChild(l2);
-    list.appendChild(row);
   }
-}
-let scoresRun = 0;
-async function loadScores() {
-  const run = ++scoresRun;
-  const btn = $("s-refresh");
-  btn.disabled = true; btn.textContent = "Refreshing…";
-  scores.state = "loading"; renderScores();
-  try {
-    const data = await buildScores(makeApi(), new Date());
-    if (run !== scoresRun) return;
-    scores = { state: "ok", data, at: new Date().toISOString() };
-  } catch (e) {
-    if (run !== scoresRun) return;
-    scores.state = "error";
-  } finally {
-    if (run === scoresRun) { renderScores(); btn.disabled = false; btn.textContent = "Refresh"; }
+  /* copied text: scores only, no overs or venue */
+  const plain = list => list.length ? list.map(i => i.score).join(" & ") : "Yet to bat";
+  function text() {
+    const d = state.data;
+    if (!d || !d.round) return "Parramatta Cheetahs " + word.toLowerCase() + " scores: no round in progress.";
+    const out = ["Parramatta Cheetahs " + word.toLowerCase() + "s - " + d.round.name + " (" + xiiRounds(d.round) + ")", ""];
+    for (const r of d.rows) {
+      const label = OUTCOME_LABEL[r.outcome] || r.outcome;
+      if (r.outcome === "bye") out.push(shortGrade(r.grade) + " Bye");
+      else if (r.outcome === "upcoming" || r.outcome === "pending") out.push(shortGrade(r.grade) + " vs " + r.them.name + " " + label);
+      else out.push(shortGrade(r.grade) + " " + plain(r.us) + " vs " + r.them.name + " " + plain(r.them.innings) + " " + label);
+    }
+    return out.join("\n");
   }
-}
-function inningsText(list) {
-  return list.length ? list.map(i => i.score + (i.overs ? " (" + i.overs + " ov)" : "")).join(" & ") : "Yet to bat";
-}
-function scoresText() {
-  const d = scores.data;
-  if (!d || !d.round) return "Parramatta Cheetahs scores: no round in progress.";
-  const out = ["Parramatta Cheetahs - " + d.round.name + " (" + xiiRounds(d.round) + ")", ""];
-  for (const r of d.rows) {
-    const label = OUTCOME_LABEL[r.outcome] || r.outcome;
-    if (r.outcome === "bye") out.push(shortGrade(r.grade) + " Bye");
-    else if (r.outcome === "upcoming" || r.outcome === "pending") out.push(shortGrade(r.grade) + " vs " + r.them.name + " - " + label);
-    else out.push(shortGrade(r.grade) + " " + inningsText(r.us) + " vs " + r.them.name + " " + inningsText(r.them.innings) + " - " + label);
+  async function load() {
+    const run = ++runNo;
+    const btn = $(prefix + "-refresh");
+    btn.disabled = true; btn.textContent = "Refreshing…";
+    state.state = "loading"; render();
+    try {
+      const data = await buildScores(makeApi(), new Date(), kind);
+      if (run !== runNo) return;
+      state = { state: "ok", data, at: new Date().toISOString() };
+    } catch (e) {
+      if (run !== runNo) return;
+      state.state = "error";
+    } finally {
+      if (run === runNo) { render(); btn.disabled = false; btn.textContent = "Refresh"; }
+    }
   }
-  return out.join("\n");
+  $(prefix + "-refresh").addEventListener("click", load);
+  $(prefix + "-copy").addEventListener("click", async e => {
+    const btn = e.currentTarget;
+    try { await navigator.clipboard.writeText(text()); btn.textContent = "Copied"; }
+    catch (err) { btn.textContent = "Copy not available"; }
+    setTimeout(() => { btn.textContent = "Copy scores"; }, 2000);
+  });
+  return { load, text, get: () => state };
 }
-$("s-refresh").addEventListener("click", loadScores);
-$("s-copy").addEventListener("click", async e => {
-  const btn = e.currentTarget;
-  try { await navigator.clipboard.writeText(scoresText()); btn.textContent = "Copied"; }
-  catch (err) { btn.textContent = "Copy not available"; }
-  setTimeout(() => { btn.textContent = "Copy scores"; }, 2000);
-});
+const seniorScores = scoresTab("s", "senior", "Senior");
+const juniorScores = scoresTab("j", "junior", "Junior");
 
 /* ---- tabs: every tab except Milestones is refreshed each time it is opened ---- */
 let milestonesLoaded = false;
 function showTab(name, updateHash) {
   for (const t of document.querySelectorAll(".tab")) t.setAttribute("aria-selected", String(t.dataset.tab === name));
-  for (const n of ["milestones", "xii", "audit", "scores"]) $("panel-" + n).hidden = name !== n;
-  if (updateHash) history.replaceState(null, "", name === "xii" ? "#club-xii" : name === "audit" ? "#audit" : name === "scores" ? "#scores" : location.pathname + location.search);
+  for (const n of ["milestones", "xii", "audit", "scores", "jscores"]) $("panel-" + n).hidden = name !== n;
+  if (updateHash) history.replaceState(null, "", name === "xii" ? "#club-xii" : name === "audit" ? "#audit" : name === "scores" ? "#scores" : name === "jscores" ? "#junior-scores" : location.pathname + location.search);
   if (name === "xii") loadXII();
   else if (name === "audit") loadAudit();
-  else if (name === "scores") loadScores();
+  else if (name === "scores") seniorScores.load();
+  else if (name === "jscores") juniorScores.load();
   else if (!milestonesLoaded) { milestonesLoaded = true; refresh(); }
 }
 document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => showTab(t.dataset.tab, true)));
@@ -1537,7 +1602,7 @@ document.querySelector(".tabs").addEventListener("keydown", e => {
   next.focus(); showTab(next.dataset.tab, true);
 });
 sections.forEach(renderSection); renderWatch();
-showTab(location.hash === "#club-xii" ? "xii" : location.hash === "#audit" ? "audit" : location.hash === "#scores" ? "scores" : "milestones", false);
+showTab(location.hash === "#club-xii" ? "xii" : location.hash === "#audit" ? "audit" : location.hash === "#scores" ? "scores" : location.hash === "#junior-scores" ? "jscores" : "milestones", false);
 </script>
 </body>
 </html>
