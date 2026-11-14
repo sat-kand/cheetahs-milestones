@@ -1026,9 +1026,10 @@ async function buildRecords(api) {
   const all = [...rows.values()];
   const dates = all.map(r => r.date).filter(Boolean).sort();
   const records = clubRecords(all);
-  const [bat, bowl] = await Promise.all([individualBests(api, "bat", seasons, seniorBySeason), individualBests(api, "bowl", seasons, seniorBySeason)]);
+  const [bat, bowl, career] = await Promise.all([individualBests(api, "bat", seasons, seniorBySeason), individualBests(api, "bowl", seasons, seniorBySeason), careerLists(api)]);
   records.batting = bat;
   records.bowling = bowl;
+  records.career = career;
   return { matches: all.length, first: dates[0] || "", last: dates[dates.length - 1] || "", failed, records };
 }
 
@@ -1132,6 +1133,35 @@ async function individualBests(api, kind, seasons, seniorBySeason) {
   return found.slice(0, RECORDS_TOP);
 }
 
+/* ---- Career lists: most matches, runs, wickets and dismissals ----
+   These are the club's own career totals, so they count every club match, junior matches included, and they are the
+   same numbers the Milestones tab watches. Play Cricket has no sort for a fielder's total dismissals, so candidates
+   are gathered from each part and added up here. */
+const CAREER_SPECS = [
+  { key: "matches", path: "batting-statistics", sorts: ["Matches:desc"], value: st => Number(st.matches) || 0 },
+  { key: "runs", path: "batting-statistics", sorts: ["BattingAggregate:desc"], value: st => Number(st.battingAggregate) || 0 },
+  { key: "wickets", path: "bowling-statistics", sorts: ["BowlingWickets:desc"], value: st => Number(st.bowlingWickets) || 0 },
+  { key: "dismissals", path: "fielding-statistics", sorts: ["FieldingCatchesNonWK:desc", "FieldingCatchesWK:desc", "FieldingStumpings:desc", "FieldingRunOuts:desc", "Matches:desc"],
+    value: st => (Number(st.fieldingTotalCatches) || 0) + (Number(st.fieldingStumpings) || 0) + (Number(st.fieldingRunOuts) || 0) }
+];
+async function careerLists(api) {
+  const out = {};
+  await mapLimit(CAREER_SPECS, 4, async spec => {
+    const found = new Map();
+    for (const sort of spec.sorts) {
+      let rows = [];
+      try { rows = await api.getStatsPage(spec.path, sort, "", 50); } catch (e) { continue; }
+      for (const p of rows) found.set(p.id, p);
+    }
+    out[spec.key] = [...found.values()]
+      .map(p => ({ who: displayName(tidyName(p.name)), value: spec.value(p.statistics || {}), stats: p.statistics || {} }))
+      .filter(e => e.value > 0)
+      .sort((a, b) => b.value - a.value || a.who.localeCompare(b.who))
+      .slice(0, RECORDS_TOP);
+  });
+  return out;
+}
+
 /* api = { getMatchesPage(offset), getBowlPage(offset), getBatPage(offset), getSeasons(), getTeams(seasonId), getPerf(playerId, seasonId), getMatch(matchId) } */
 async function buildCrossData(api, now, cfg, onTotals) {
   const totals = await loadTotals(api[cfg.page], cfg);
@@ -1192,7 +1222,8 @@ function makeApi() {
   };
   return {
     getStatsPage: (kind, sort, seasonId, limit) => once("sp" + kind + sort + seasonId + limit, async () => {
-      const q = new URLSearchParams({ offset: "1", limit: String(limit || 25), sort: sort, seasonId: seasonId, jsconfig: "eccn:true" });
+      const q = new URLSearchParams({ offset: "1", limit: String(limit || 25), sort: sort, jsconfig: "eccn:true" });
+      if (seasonId) q.set("seasonId", seasonId); /* no season means the whole of the club's history */
       return (await getJSON("/participants/organisations/" + ORG + "/" + kind + "?" + q.toString())).participants || [];
     }),
     getMatchesPage: statsPage("batting-statistics", "Matches:desc"),
@@ -1789,12 +1820,24 @@ function renderRecords() {
   if (records.state === "error" && !records.data) { sum.innerHTML = '<span class="bad" style="margin:0">Could not load the match history from Play Cricket. Press Refresh to try again.</span>'; return; }
   const d = records.data;
   sum.innerHTML = "From <strong>" + fmtNum(d.matches) + " completed senior matches</strong> in Play Cricket, " + fmtDate3(d.first) + " to " + fmtDate3(d.last) + ".";
+  sum.innerHTML += " Career lists cover every club match, junior matches included.";
   if (d.failed) sum.innerHTML += '<span class="bad">Could not read ' + plural(d.failed, "team or season", "teams or seasons") + ", so some matches may be missing. Press Refresh to try again.</span>";
   if (records.state === "error") sum.innerHTML += '<span class="bad">Could not refresh. Press Refresh to try again.</span>';
+  const career = d.records.career || {};
+  const num = v => Number(v) || 0;
+  const join = parts => parts.filter(Boolean).join(" · ");
+  const careerDet = {
+    matches: () => "",
+    runs: st => join([st.battingHighScore != null ? "best " + st.battingHighScore + (st.isBattingHSNotOut ? "*" : "") : "", st.battingAverage != null ? "average " + st.battingAverage : ""]),
+    wickets: st => join([st.bowlingBestInnings ? "best " + st.bowlingBestInnings : "", st.bowlingAverage != null ? "average " + st.bowlingAverage : ""]),
+    dismissals: st => join([plural(num(st.fieldingTotalCatches), "catch", "catches"), num(st.fieldingStumpings) ? plural(num(st.fieldingStumpings), "stumping", "stumpings") : "", num(st.fieldingRunOuts) ? plural(num(st.fieldingRunOuts), "run out", "run outs") : ""])
+  };
   const groups = [["Highest individual score", d.records.batting], ["Best bowling in an innings", d.records.bowling],
+                  ["Most runs", career.runs, "runs"], ["Most wickets", career.wickets, "wickets"],
+                  ["Most matches", career.matches, "matches"], ["Most dismissals", career.dismissals, "dismissals"],
                   ["Highest score chased", d.records.chases], ["Highest team total", d.records.totals],
                   ["Biggest win by runs", d.records.runs], ["Biggest innings win", d.records.innings]];
-  for (const [title, list] of groups) {
+  for (const [title, list, careerKey] of groups) {
     const card = document.createElement("section"); card.className = "card"; card.setAttribute("aria-label", title);
     const h = document.createElement("h3"); h.textContent = title; card.appendChild(h);
     if (!list || !list.length) { const p = document.createElement("p"); p.className = "empty"; p.textContent = "None recorded."; card.appendChild(p); }
@@ -1803,13 +1846,18 @@ function renderRecords() {
       const r = e.row;
       const li = document.createElement("li"); li.className = "rec";
       const no = document.createElement("span"); no.className = "no"; no.textContent = (i + 1) + ".";
-      const val = document.createElement("span"); val.className = "val"; val.textContent = e.show + (e.who ? " — " + e.who : "");
+      const val = document.createElement("span"); val.className = "val"; val.textContent = (e.show || fmtNum(e.value)) + (e.who ? " — " + e.who : "");
       const det = document.createElement("span"); det.className = "det";
-      const scores = e.who ? "" : (r.us || "–") + " v " + (r.them || "–") + " · ";
-      det.appendChild(document.createTextNode(shortGrade(r.grade) + " v " + r.opponent + ", " + fmtDate3(r.date) + " · " + scores));
-      const a = document.createElement("a"); a.href = "https://play.cricket.com.au/match/" + encodeURIComponent(r.id) + "?tab=scorecard"; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Scorecard";
-      det.appendChild(a);
-      li.append(no, val, det);
+      if (careerKey) {
+        det.textContent = careerDet[careerKey](e.stats || {});
+      } else {
+        const scores = e.who ? "" : (r.us || "–") + " v " + (r.them || "–") + " · ";
+        det.appendChild(document.createTextNode(shortGrade(r.grade) + " v " + r.opponent + ", " + fmtDate3(r.date) + " · " + scores));
+        const a = document.createElement("a"); a.href = "https://play.cricket.com.au/match/" + encodeURIComponent(r.id) + "?tab=scorecard"; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Scorecard";
+        det.appendChild(a);
+      }
+      li.append(no, val);
+      if (det.textContent) li.appendChild(det);
       ul.appendChild(li);
     });
     card.appendChild(ul);
