@@ -191,6 +191,13 @@ td.num { font-weight: 700; color: var(--heading); }
 .xnum { display: inline-block; min-width: 1.6em; margin-right: 6px; padding: 0 4px; text-align: center; border-radius: 999px; background: var(--gold); color: var(--brand); font-size: 0.8rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .xii-grid { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
 .card.clean { border-top-color: var(--line); }
+.rec-grid { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.rec-grid h3 { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.rec { display: grid; grid-template-columns: 1.6em minmax(0, 1fr); gap: 0 6px; }
+.rec .no { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.rec .val { font-weight: 700; color: var(--heading); }
+.rec .det { grid-column: 2; font-size: 0.85rem; color: var(--muted); }
+.rec a { color: var(--heading); font-weight: 600; white-space: nowrap; }
 .card .vs { color: var(--muted); font-size: 0.88rem; margin: -6px 0 0; }
 .issue { font-size: 0.92rem; }
 .issue .tag { display: inline-block; margin-right: 6px; padding: 0 7px; border-radius: 999px; background: var(--pill-bg); color: var(--pill-ink); font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
@@ -247,6 +254,7 @@ td.num { font-weight: 700; color: var(--heading); }
     <button type="button" class="tab" role="tab" id="tab-milestones" data-tab="milestones" aria-controls="panel-milestones" aria-selected="false">Milestones</button>
     <button type="button" class="tab" role="tab" id="tab-xii" data-tab="xii" aria-controls="panel-xii" aria-selected="false">Club XII</button>
     <button type="button" class="tab" role="tab" id="tab-audit" data-tab="audit" aria-controls="panel-audit" aria-selected="false">Scorecard Audit</button>
+    <button type="button" class="tab" role="tab" id="tab-records" data-tab="records" aria-controls="panel-records" aria-selected="false">Records</button>
   </div>
 
   <div class="panel" id="panel-milestones" role="tabpanel" aria-labelledby="tab-milestones" hidden>
@@ -343,6 +351,17 @@ td.num { font-weight: 700; color: var(--heading); }
     </div>
     <div id="j-note" class="bad snote"></div>
     <div class="scores" id="j-list"></div>
+  </div>
+
+  <div class="panel" id="panel-records" role="tabpanel" aria-labelledby="tab-records" hidden>
+    <div class="toolbar">
+      <div class="actions"><button type="button" class="refresh" id="rec-refresh">Refresh</button></div>
+    </div>
+    <section class="block" aria-labelledby="h-records">
+      <h2 id="h-records">Senior club records</h2>
+      <div class="summary" id="rec-summary">Loading every senior match…</div>
+      <div class="grid rec-grid" id="rec-grid"></div>
+    </section>
   </div>
 
   <div class="panel" id="panel-audit" role="tabpanel" aria-labelledby="tab-audit" hidden>
@@ -943,6 +962,67 @@ async function buildScores(api, now, kind) {
     });
   }
   return { round, rows, failedTeams };
+}
+
+/* ---- Club records (every completed senior match in Play Cricket) ---- */
+const RECORDS_TOP = 10;
+/* "9-307d & 0-0" becomes [{ wickets: 9, runs: 307, text: "9-307d", declared: true }]; an innings that never started is left out.
+   Older scorecards write a declaration as "9d-336". */
+function parseScoreText(text) {
+  return String(text == null ? "" : text).split("&").map(x => x.trim()).map(x => {
+    const m = x.match(/^(?:(\d+)(d?)-)?(\d+)(d?)$/i);
+    if (!m || x === "0-0") return null;
+    return { wickets: m[1] == null ? 10 : Number(m[1]), runs: Number(m[3]), text: x, declared: !!(m[2] || m[4]) };
+  }).filter(Boolean);
+}
+/* rows: [{ won, result, us: "score text", them: "score text", ... }]. Returns the four top-ten lists. */
+function clubRecords(rows) {
+  const top = (list) => list.sort((a, b) => b.value - a.value || String(b.row.date).localeCompare(String(a.row.date))).slice(0, RECORDS_TOP);
+  const totals = [], runs = [], innings = [], chases = [];
+  for (const row of rows) {
+    const us = parseScoreText(row.us), them = parseScoreText(row.them);
+    for (const i of us) totals.push({ value: i.runs, show: i.text, row });
+    if (!row.won) continue;
+    const result = String(row.result || "");
+    const inn = result.match(/won by an innings and (\d+) runs?/i);
+    const byRuns = result.match(/won by (\d+) runs?/i);
+    if (inn) innings.push({ value: Number(inn[1]), show: "Innings and " + inn[1] + " runs", row });
+    else if (byRuns) runs.push({ value: Number(byRuns[1]), show: byRuns[1] + " runs", row });
+    /* a chase: they batted once, we passed their total without declaring and won by wickets */
+    if (/won by \d+ wickets?/i.test(result) && us.length === 1 && them.length === 1 && !us[0].declared && us[0].runs > them[0].runs) {
+      chases.push({ value: them[0].runs, show: us[0].text + " chasing " + them[0].runs, row });
+    }
+  }
+  /* one entry per innings is too many for a team that tops the list twice in a match: keep a match's best total only */
+  const best = new Map();
+  for (const t of totals) { const k = t.row.id + "|" + t.row.teamId; if (!best.has(k) || t.value > best.get(k).value) best.set(k, t); }
+  return { chases: top(chases), totals: top([...best.values()]), runs: top(runs), innings: top(innings) };
+}
+/* api.getTeamMatches for every senior team in every season the club has in Play Cricket. */
+async function buildRecords(api) {
+  const seasons = await api.getSeasons();
+  const rows = new Map();
+  let failed = 0;
+  await mapLimit(seasons, 3, async s => {
+    let teams;
+    try { teams = (await api.getTeams(s.id)).filter(isSeniorTeam); } catch (e) { failed++; return; }
+    await mapLimit(teams, 4, async t => {
+      let list;
+      try { list = await api.getTeamMatches(t.id); } catch (e) { failed++; return; }
+      for (const m of list) {
+        if (m.matchType === "BYE" || String(m.status).toUpperCase() !== "COMPLETED") continue;
+        const us = (m.teams || []).find(x => x.id === t.id), them = (m.teams || []).find(x => x.id !== t.id);
+        if (!us || !them) continue;
+        const days = (m.matchSchedule || []).map(x => parseDate(x.startDateTime)).filter(d => !isNaN(d)).map(ymdSydney).sort();
+        const club = them.owningOrganisation && (them.owningOrganisation.name || them.owningOrganisation.shortName);
+        rows.set(m.id + "|" + t.id, { id: m.id, teamId: t.id, grade: teamLabel(t), season: s.name, date: days[0] || "", won: !!us.isWinner,
+          result: m.resultText || "", us: us.scoreText, them: them.scoreText, opponent: shortClub(club) || them.displayName || "Opponent" });
+      }
+    });
+  });
+  const all = [...rows.values()];
+  const dates = all.map(r => r.date).filter(Boolean).sort();
+  return { matches: all.length, first: dates[0] || "", last: dates[dates.length - 1] || "", failed, records: clubRecords(all) };
 }
 
 /* api = { getMatchesPage(offset), getBowlPage(offset), getBatPage(offset), getSeasons(), getTeams(seasonId), getPerf(playerId, seasonId), getMatch(matchId) } */
@@ -1584,16 +1664,74 @@ function scoresTab(prefix, kind, word) {
 const seniorScores = scoresTab("s", "senior", "Senior");
 const juniorScores = scoresTab("j", "junior", "Junior");
 
+/* ---- Records tab: loaded the first time it is opened, then only on Refresh (it reads every season) ---- */
+let records = { state: "idle", data: null };
+function fmtDate3(ymd) {
+  if (!ymd) return "";
+  const d = new Date(ymd + "T12:00:00Z");
+  return new Intl.DateTimeFormat("en-AU", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" }).format(d);
+}
+function renderRecords() {
+  const sum = $("rec-summary"), grid = $("rec-grid");
+  grid.innerHTML = "";
+  if (records.state === "loading" && !records.data) { sum.textContent = "Loading every senior match…"; return; }
+  if (records.state === "error" && !records.data) { sum.innerHTML = '<span class="bad" style="margin:0">Could not load the match history from Play Cricket. Press Refresh to try again.</span>'; return; }
+  const d = records.data;
+  sum.innerHTML = "From <strong>" + fmtNum(d.matches) + " completed senior matches</strong> in Play Cricket, " + fmtDate3(d.first) + " to " + fmtDate3(d.last) + ".";
+  if (d.failed) sum.innerHTML += '<span class="bad">Could not read ' + plural(d.failed, "team or season", "teams or seasons") + ", so some matches may be missing. Press Refresh to try again.</span>";
+  if (records.state === "error") sum.innerHTML += '<span class="bad">Could not refresh. Press Refresh to try again.</span>';
+  const groups = [["Highest score chased", d.records.chases], ["Highest team total", d.records.totals], ["Biggest win by runs", d.records.runs], ["Biggest innings win", d.records.innings]];
+  for (const [title, list] of groups) {
+    const card = document.createElement("section"); card.className = "card"; card.setAttribute("aria-label", title);
+    const h = document.createElement("h3"); h.textContent = title; card.appendChild(h);
+    if (!list.length) { const p = document.createElement("p"); p.className = "empty"; p.textContent = "None recorded."; card.appendChild(p); }
+    const ul = document.createElement("ul");
+    list.forEach((e, i) => {
+      const r = e.row;
+      const li = document.createElement("li"); li.className = "rec";
+      const no = document.createElement("span"); no.className = "no"; no.textContent = (i + 1) + ".";
+      const val = document.createElement("span"); val.className = "val"; val.textContent = e.show;
+      const det = document.createElement("span"); det.className = "det";
+      det.appendChild(document.createTextNode(shortGrade(r.grade) + " v " + r.opponent + ", " + fmtDate3(r.date) + " · " + (r.us || "–") + " v " + (r.them || "–") + " · "));
+      const a = document.createElement("a"); a.href = "https://play.cricket.com.au/match/" + encodeURIComponent(r.id) + "?tab=scorecard"; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Scorecard";
+      det.appendChild(a);
+      li.append(no, val, det);
+      ul.appendChild(li);
+    });
+    card.appendChild(ul);
+    grid.appendChild(card);
+  }
+}
+let recordsRun = 0;
+async function loadRecords() {
+  const run = ++recordsRun;
+  const btn = $("rec-refresh");
+  btn.disabled = true; btn.textContent = "Refreshing…";
+  records.state = "loading"; renderRecords();
+  try {
+    const data = await buildRecords(makeApi());
+    if (run !== recordsRun) return;
+    records = { state: "ok", data };
+  } catch (e) {
+    if (run !== recordsRun) return;
+    records.state = "error";
+  } finally {
+    if (run === recordsRun) { renderRecords(); btn.disabled = false; btn.textContent = "Refresh"; }
+  }
+}
+$("rec-refresh").addEventListener("click", loadRecords);
+
 /* ---- tabs: every tab except Milestones is refreshed each time it is opened ---- */
 let milestonesLoaded = false;
 function showTab(name, updateHash) {
   for (const t of document.querySelectorAll(".tab")) t.setAttribute("aria-selected", String(t.dataset.tab === name));
-  for (const n of ["milestones", "xii", "audit", "scores", "jscores"]) $("panel-" + n).hidden = name !== n;
-  if (updateHash) history.replaceState(null, "", name === "xii" ? "#club-xii" : name === "audit" ? "#audit" : name === "scores" ? "#scores" : name === "jscores" ? "#junior-scores" : name === "milestones" ? "#milestones" : location.pathname + location.search);
+  for (const n of ["milestones", "xii", "audit", "scores", "jscores", "records"]) $("panel-" + n).hidden = name !== n;
+  if (updateHash) history.replaceState(null, "", name === "xii" ? "#club-xii" : name === "audit" ? "#audit" : name === "scores" ? "#scores" : name === "jscores" ? "#junior-scores" : name === "milestones" ? "#milestones" : name === "records" ? "#records" : location.pathname + location.search);
   if (name === "xii") loadXII();
   else if (name === "audit") loadAudit();
   else if (name === "scores") seniorScores.load();
   else if (name === "jscores") juniorScores.load();
+  else if (name === "records") { if (records.state === "idle") loadRecords(); }
   else if (name === "milestones" && !milestonesLoaded) { milestonesLoaded = true; refresh(); }
 }
 document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => showTab(t.dataset.tab, true)));
@@ -1604,7 +1742,7 @@ document.querySelector(".tabs").addEventListener("keydown", e => {
   next.focus(); showTab(next.dataset.tab, true);
 });
 sections.forEach(renderSection); renderWatch();
-showTab(location.hash === "#club-xii" ? "xii" : location.hash === "#audit" ? "audit" : location.hash === "#scores" ? "scores" : location.hash === "#junior-scores" ? "jscores" : location.hash === "#milestones" ? "milestones" : "scores", false);
+showTab(location.hash === "#club-xii" ? "xii" : location.hash === "#audit" ? "audit" : location.hash === "#scores" ? "scores" : location.hash === "#junior-scores" ? "jscores" : location.hash === "#milestones" ? "milestones" : location.hash === "#records" ? "records" : "scores", false);
 </script>
 </body>
 </html>
