@@ -326,7 +326,7 @@ td.num { font-weight: 700; color: var(--heading); }
   <div class="panel" id="panel-scores" role="tabpanel" aria-labelledby="tab-scores" hidden>
     <div class="scores-head">
       <div class="scores-title" id="s-title">Loading the current round…</div>
-      <button type="button" class="refresh" id="s-refresh">Refresh</button>
+      <div class="actions"><button type="button" class="refresh" id="s-refresh">Refresh</button><button type="button" class="copy" id="s-copy">Copy scores</button></div>
     </div>
     <div id="s-note" class="bad"></div>
     <div class="scores" id="s-list"></div>
@@ -809,6 +809,12 @@ function inningsFromText(t) {
   const ov = Number(t.oversBowled) || 0;
   return parts.map((score, i) => ({ score, overs: i === 0 && ov ? String(t.oversBowled) : "" }));
 }
+/* "Kings Langley Cricket Club" becomes "Kings Langley": club-type words at the end of the name are dropped. */
+function shortClub(name) {
+  let s = String(name || "").trim(), prev;
+  do { prev = s; s = s.replace(/[\s,]+(incorporated|inc\.?|cricket club|sports club|sports)$/i, "").trim(); } while (s !== prev && s);
+  return s || String(name || "").trim();
+}
 /* "Senior B13" with team "Seniors B13(Gold)" becomes "Senior B13 Gold", so two teams in one grade can be told apart. */
 function teamLabel(t) {
   const m = String(t.name || "").match(/\(([^)]+)\)\s*$/);
@@ -842,15 +848,15 @@ async function buildScores(api, now) {
         if (!days.length) continue;
         if (!r.first || days[0] < r.first) r.first = days[0];
         if (!r.last || days[days.length - 1] > r.last) r.last = days[days.length - 1];
-        if (r.rows.has(m.id)) continue; /* a match between two of our teams is listed once */
+        const rowKey = m.id + "|" + t.id; /* a match between two of our teams gets a row for each of them */
         const us = (m.teams || []).find(x => x.id === t.id) || null;
         const them = (m.teams || []).find(x => x.id !== t.id) || null;
         const club = them && them.owningOrganisation && (them.owningOrganisation.name || them.owningOrganisation.shortName);
         const sameClub = them && ourTeams.has(them.id);
         let outcome = matchOutcome(m, us, them);
         if (outcome === "upcoming" && days[0] <= today) outcome = "pending"; /* should have started, nothing entered yet */
-        r.rows.set(m.id, { id: m.id, grade, rank: gradeRank(grade), outcome, usId: us && us.id, themId: them && them.id,
-          us: inningsFromText(us), them: { name: (them && ((sameClub ? "" : club) || them.displayName)) || "Opponent", innings: inningsFromText(them) } });
+        r.rows.set(rowKey, { id: m.id, grade, rank: gradeRank(grade), outcome, usId: us && us.id, themId: them && them.id,
+          us: inningsFromText(us), them: { name: (them && ((sameClub ? "" : shortClub(club)) || them.displayName)) || "Opponent", innings: inningsFromText(them) } });
       }
     });
   }
@@ -860,9 +866,11 @@ async function buildScores(api, now) {
   const rows = [...round.rows.values()].sort((a, b) => a.rank - b.rank || a.grade.localeCompare(b.grade) || a.them.name.localeCompare(b.them.name));
   /* the scorecard has the overs of every innings; keep the fixture figures if it cannot be read */
   if (api.getScorecardFresh) {
+    const cards = new Map(); /* one lookup per match, even when two of our teams share it */
+    const card = id => { if (!cards.has(id)) cards.set(id, api.getScorecardFresh(id)); return cards.get(id); };
     await mapLimit(rows.filter(r => r.usId && r.outcome !== "upcoming" && r.outcome !== "pending"), 6, async r => {
       try {
-        const sc = await api.getScorecardFresh(r.id);
+        const sc = await card(r.id);
         if (!sc || !Array.isArray(sc.innings)) return;
         r.us = inningsFromScorecard(sc, r.usId);
         if (r.themId) r.them.innings = inningsFromScorecard(sc, r.themId);
@@ -1471,7 +1479,28 @@ async function loadScores() {
     if (run === scoresRun) { renderScores(); btn.disabled = false; btn.textContent = "Refresh"; }
   }
 }
+function inningsText(list) {
+  return list.length ? list.map(i => i.score + (i.overs ? " (" + i.overs + " ov)" : "")).join(" & ") : "Yet to bat";
+}
+function scoresText() {
+  const d = scores.data;
+  if (!d || !d.round) return "Parramatta Cheetahs scores: no round in progress.";
+  const out = ["Parramatta Cheetahs - " + d.round.name + " (" + xiiRounds(d.round) + ")", ""];
+  for (const r of d.rows) {
+    const label = OUTCOME_LABEL[r.outcome] || r.outcome;
+    if (r.outcome === "bye") out.push(shortGrade(r.grade) + " Bye");
+    else if (r.outcome === "upcoming" || r.outcome === "pending") out.push(shortGrade(r.grade) + " vs " + r.them.name + " - " + label);
+    else out.push(shortGrade(r.grade) + " " + inningsText(r.us) + " vs " + r.them.name + " " + inningsText(r.them.innings) + " - " + label);
+  }
+  return out.join("\n");
+}
 $("s-refresh").addEventListener("click", loadScores);
+$("s-copy").addEventListener("click", async e => {
+  const btn = e.currentTarget;
+  try { await navigator.clipboard.writeText(scoresText()); btn.textContent = "Copied"; }
+  catch (err) { btn.textContent = "Copy not available"; }
+  setTimeout(() => { btn.textContent = "Copy scores"; }, 2000);
+});
 
 /* ---- tabs: every tab except Milestones is refreshed each time it is opened ---- */
 let milestonesLoaded = false;
