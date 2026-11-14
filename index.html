@@ -1994,8 +1994,11 @@ function renderRecords() {
   $("h-records").textContent = junior ? "Junior club records" : "Senior club records";
   $("honours").hidden = junior;
   const say = html => { sum.innerHTML = html; sum.hidden = !html; };
-  if (records.state === "loading" && !records.data) { say("Loading every " + (junior ? "junior" : "senior") + " match…"); return; }
-  if (records.state === "error" && !records.data) { say('<span class="bad" style="margin:0">Could not load the match history from Play Cricket. Press Refresh to try again.</span>'); return; }
+  if (!records.data) { /* idle, loading, or a first attempt that failed */
+    say(records.state === "error" ? '<span class="bad" style="margin:0">Could not load the match history from Play Cricket. Press Refresh to try again.</span>'
+                                  : "Loading every " + (junior ? "junior" : "senior") + " match…");
+    return;
+  }
   const d = records.data;
   let note = "";
   if (d.failed) note += '<span class="bad" style="margin:0">Could not read ' + plural(d.failed, "team or season", "teams or seasons") + ", so some matches may be missing. Press Refresh to try again.</span>";
