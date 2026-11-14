@@ -202,17 +202,20 @@ td.num { font-weight: 700; color: var(--heading); }
 .scores-title small { display: block; font-weight: 400; color: var(--muted); font-size: 0.8rem; }
 #s-note:empty { display: none; }
 .scores { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--gold); border-radius: 6px; }
-.srow { padding: 7px 10px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; display: flex; flex-direction: column; gap: 1px; }
+.srow { padding: 7px 10px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; display: flex; flex-direction: column; gap: 2px; }
 .srow:last-child { border-bottom: 0; }
-.srow .l1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.srow .l1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
+.srow .side { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 0 7px; position: static; flex-direction: row; top: auto; }
 .srow .g { font-family: var(--font-display); font-weight: 700; font-size: 1.1rem; color: var(--heading); }
 .srow .sc { font-weight: 700; color: var(--heading); }
-.srow .sc small, .srow .l2 small { font-weight: 400; color: var(--muted); font-size: 0.8rem; }
-.srow .amp { color: var(--muted); font-weight: 400; }
-.srow .l1 .st { margin-left: auto; align-self: center; }
-.srow .l2 { font-size: 0.86rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 0 8px; align-items: baseline; }
-.srow .l2 .sc { font-weight: 600; color: var(--ink); }
+.srow .sc small { font-weight: 400; color: var(--muted); font-size: 0.8rem; }
+.srow .amp, .srow .vs { color: var(--muted); font-weight: 400; font-size: 0.86rem; }
 .srow .ytb { color: var(--muted); font-size: 0.86rem; }
+.srow .l2 { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.srow .venue { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--muted); font-size: 0.8rem; }
+.srow .venue svg { flex: none; width: 12px; height: 12px; fill: currentColor; }
+.srow .venue span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srow .l2 .st { flex: none; margin-left: auto; }
 .st { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 8px; border-radius: 999px; background: var(--pill-bg); color: var(--pill-ink); white-space: nowrap; }
 .st.won { background: #1f7a3d; color: #fff; }
 .st.lost { background: #b3261e; color: #fff; }
@@ -855,7 +858,8 @@ async function buildScores(api, now) {
         const sameClub = them && ourTeams.has(them.id);
         let outcome = matchOutcome(m, us, them);
         if (outcome === "upcoming" && days[0] <= today) outcome = "pending"; /* should have started, nothing entered yet */
-        r.rows.set(rowKey, { id: m.id, grade, rank: gradeRank(grade), outcome, usId: us && us.id, themId: them && them.id,
+        const venue = (m.venue && (m.venue.name || (m.venue.playingSurface && m.venue.playingSurface.name))) || "";
+        r.rows.set(rowKey, { id: m.id, venue: String(venue).trim(), grade, rank: gradeRank(grade), outcome, usId: us && us.id, themId: them && them.id,
           us: inningsFromText(us), them: { name: (them && ((sameClub ? "" : shortClub(club)) || them.displayName)) || "Opponent", innings: inningsFromText(them) } });
       }
     });
@@ -1444,21 +1448,33 @@ function renderScores() {
   list.hidden = !d.rows.length;
   for (const r of d.rows) {
     const row = document.createElement("div"); row.className = "srow";
-    const l1 = document.createElement("div"); l1.className = "l1";
-    const g = document.createElement("span"); g.className = "g"; g.textContent = shortGrade(r.grade);
-    l1.appendChild(g);
     const noScores = r.outcome === "bye" || r.outcome === "upcoming" || r.outcome === "pending";
-    if (!noScores) l1.appendChild(inningsNode(r.us));
-    const st = document.createElement("span"); st.className = "st " + r.outcome; st.textContent = OUTCOME_LABEL[r.outcome] || r.outcome;
-    l1.appendChild(st);
-    row.appendChild(l1);
+    const l1 = document.createElement("div"); l1.className = "l1";
+    const mine = document.createElement("span"); mine.className = "side";
+    const g = document.createElement("span"); g.className = "g"; g.textContent = shortGrade(r.grade);
+    mine.appendChild(g);
+    if (!noScores) mine.appendChild(inningsNode(r.us));
+    l1.appendChild(mine);
     if (r.outcome !== "bye") {
-      const l2 = document.createElement("div"); l2.className = "l2";
-      const who = document.createElement("span"); who.textContent = "vs " + r.them.name;
-      l2.appendChild(who);
-      if (!noScores) l2.appendChild(inningsNode(r.them.innings));
-      row.appendChild(l2);
+      const vs = document.createElement("span"); vs.className = "vs"; vs.textContent = "vs";
+      const theirs = document.createElement("span"); theirs.className = "side";
+      const who = document.createElement("span"); who.className = "g"; who.textContent = r.them.name;
+      theirs.appendChild(who);
+      if (!noScores) theirs.appendChild(inningsNode(r.them.innings));
+      l1.append(vs, theirs);
     }
+    row.appendChild(l1);
+    const l2 = document.createElement("div"); l2.className = "l2";
+    if (r.venue) {
+      const v = document.createElement("span"); v.className = "venue";
+      v.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>';
+      const vn = document.createElement("span"); vn.textContent = r.venue;
+      v.appendChild(vn);
+      l2.appendChild(v);
+    }
+    const st = document.createElement("span"); st.className = "st " + r.outcome; st.textContent = OUTCOME_LABEL[r.outcome] || r.outcome;
+    l2.appendChild(st);
+    row.appendChild(l2);
     list.appendChild(row);
   }
 }
