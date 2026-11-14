@@ -838,15 +838,16 @@ function isJuniorTeam(t) {
   const text = [t.name, t.grade && t.grade.name].filter(Boolean).join(" ");
   return !isSeniorTeam(t) && !/t20|twenty20/i.test(text);
 }
-/* "Juniors U10 Blue(Parveen)" becomes "U10 Blue": the team's own name without the coach in brackets. */
+/* "Juniors U10 Blue(Parveen)" becomes "U10 Blue (Parveen)": the team's own name, keeping the coach in brackets
+   where the team has one (the girls, under 10 and under 11 teams). */
 function juniorLabel(t) {
-  const s = String(t.name || "").replace(/\([^)]*\)/g, " ").replace(/^juniors?\s+/i, "").replace(/\s+/g, " ").trim();
+  const s = String(t.name || "").replace(/^juniors?\s+/i, "").replace(/\s*\(\s*([^)]*?)\s*\)/g, " ($1)").replace(/\s+/g, " ").trim();
   return s || gradeLabel(t);
 }
-/* Youngest age group first, girls' teams last. */
+/* Girls' teams first, then the youngest age group upwards. */
 function juniorRank(label) {
   const m = String(label).match(/\bU\s?(\d{1,2})\b/i);
-  return (/girl/i.test(label) ? 100 : 0) + (m ? Number(m[1]) : 50);
+  return /girl/i.test(label) ? 0 : (m ? Number(m[1]) : 50);
 }
 const SCORE_KINDS = {
   senior: { filter: isSeniorTeam, label: teamLabel, rank: gradeRank },
