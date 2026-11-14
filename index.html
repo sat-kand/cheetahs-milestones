@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cheetahs Milestone Watch</title>
+<title>Parramatta Cheetahs Cricket Club Dashboard</title>
 <meta name="theme-color" content="#452403">
 <link rel="icon" type="image/png" href="logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -233,8 +233,8 @@ td.num { font-weight: 700; color: var(--heading); }
   <div class="masthead-in">
     <img class="logo" src="logo.png" width="96" height="97" alt="Parramatta Cheetahs Cricket Club crest">
     <div class="masthead-text">
-      <h1>Cheetahs Milestone Watch</h1>
-      <p class="sub">Parramatta Cheetahs Cricket Club, all seasons, all teams. <span id="status"></span> Source: <a href="https://play.cricket.com.au/stats?cat=battingAvgs&amp;orgId=4059f1b9-86d8-eb11-a7ad-2818780da0cc">Play Cricket club statistics</a>.</p>
+      <h1>Parramatta Cheetahs Cricket Club Dashboard</h1>
+      <p class="sub"><span id="status"></span></p>
     </div>
   </div>
 </header>
@@ -242,14 +242,14 @@ td.num { font-weight: 700; color: var(--heading); }
 <div class="wrap">
 
   <div class="tabs" role="tablist" aria-label="Pages">
-    <button type="button" class="tab" role="tab" id="tab-milestones" data-tab="milestones" aria-controls="panel-milestones" aria-selected="true">Milestones</button>
+    <button type="button" class="tab" role="tab" id="tab-scores" data-tab="scores" aria-controls="panel-scores" aria-selected="true">Senior Scores</button>
+    <button type="button" class="tab" role="tab" id="tab-jscores" data-tab="jscores" aria-controls="panel-jscores" aria-selected="false">Junior Scores</button>
+    <button type="button" class="tab" role="tab" id="tab-milestones" data-tab="milestones" aria-controls="panel-milestones" aria-selected="false">Milestones</button>
     <button type="button" class="tab" role="tab" id="tab-xii" data-tab="xii" aria-controls="panel-xii" aria-selected="false">Club XII</button>
     <button type="button" class="tab" role="tab" id="tab-audit" data-tab="audit" aria-controls="panel-audit" aria-selected="false">Scorecard Audit</button>
-    <button type="button" class="tab" role="tab" id="tab-scores" data-tab="scores" aria-controls="panel-scores" aria-selected="false">Senior Scores</button>
-    <button type="button" class="tab" role="tab" id="tab-jscores" data-tab="jscores" aria-controls="panel-jscores" aria-selected="false">Junior Scores</button>
   </div>
 
-  <div class="panel" id="panel-milestones" role="tabpanel" aria-labelledby="tab-milestones">
+  <div class="panel" id="panel-milestones" role="tabpanel" aria-labelledby="tab-milestones" hidden>
   <div class="toolbar">
     <div class="actions"><button type="button" class="refresh" id="refresh">Refresh</button><button type="button" class="copy" id="copy">Copy list</button></div>
   </div>
@@ -327,7 +327,7 @@ td.num { font-weight: 700; color: var(--heading); }
       <div class="grid xii-grid" id="x-grid"></div>
     </section>
     </div>
-  <div class="panel scores-panel" id="panel-scores" role="tabpanel" aria-labelledby="tab-scores" hidden>
+  <div class="panel scores-panel" id="panel-scores" role="tabpanel" aria-labelledby="tab-scores">
     <div class="scores-head">
       <div class="scores-title" id="s-title">Loading the current round…</div>
       <div class="actions"><button type="button" class="refresh" id="s-refresh">Refresh</button><button type="button" class="copy" id="s-copy">Copy scores</button></div>
@@ -350,7 +350,7 @@ td.num { font-weight: 700; color: var(--heading); }
       <div class="actions"><button type="button" class="refresh" id="a-refresh">Refresh</button><button type="button" class="copy" id="a-copy">Copy issues</button></div>
     </div>
     <section class="block" aria-labelledby="h-audit">
-      <h2 id="h-audit">Scorecard audit</h2>
+      <h2 id="h-audit">Senior scorecard audit</h2>
       <p class="blurb">Checks each senior team's scorecard for the club's last completed round: batting and bowling totals add up, every catch, stumping and run out is credited to a fielder, and no player's name is hidden.</p>
       <div class="summary" id="a-summary">Loading the last completed round…</div>
       <div class="grid xii-grid" id="a-grid"></div>
@@ -1438,8 +1438,8 @@ function renderAudit() {
 }
 function auditText() {
   const d = audit.data;
-  if (!d || !d.round) return "Parramatta Cheetahs scorecard audit: no completed round yet.";
-  const out = ["Parramatta Cheetahs scorecard audit - " + d.round.name + " (" + xiiRounds(d.round) + ")"];
+  if (!d || !d.round) return "Parramatta Cheetahs senior scorecard audit: no completed round yet.";
+  const out = ["Parramatta Cheetahs senior scorecard audit - " + d.round.name + " (" + xiiRounds(d.round) + ")"];
   for (const t of d.teams) {
     if (t.loaded && !t.issues.length) continue;
     out.push("", shortGrade(t.grade) + " - " + t.name + (t.opponent ? " v " + t.opponent : ""));
@@ -1543,15 +1543,16 @@ function scoresTab(prefix, kind, word) {
   }
   /* copied text: scores only, no overs or venue */
   const plain = list => list.length ? list.map(i => i.score).join(" & ") : "Yet to bat";
+  const team = r => shortGrade(r.grade).replace(/\s*\([^)]*\)/g, "").trim(); /* no coach name in copied text */
   function text() {
     const d = state.data;
     if (!d || !d.round) return "Parramatta Cheetahs " + word.toLowerCase() + " scores: no round in progress.";
     const out = ["Parramatta Cheetahs " + word.toLowerCase() + "s - " + d.round.name + " (" + xiiRounds(d.round) + ")", ""];
     for (const r of d.rows) {
       const label = OUTCOME_LABEL[r.outcome] || r.outcome;
-      if (r.outcome === "bye") out.push(shortGrade(r.grade) + " Bye");
-      else if (r.outcome === "upcoming" || r.outcome === "pending") out.push(shortGrade(r.grade) + " vs " + r.them.name + " " + label);
-      else out.push(shortGrade(r.grade) + " " + plain(r.us) + " vs " + r.them.name + " " + plain(r.them.innings) + " " + label);
+      if (r.outcome === "bye") out.push(team(r) + " Bye");
+      else if (r.outcome === "upcoming" || r.outcome === "pending") out.push(team(r) + " vs " + r.them.name + " " + label);
+      else out.push(team(r) + " " + plain(r.us) + " vs " + r.them.name + " " + plain(r.them.innings) + " " + label);
     }
     return out.join("\n");
   }
@@ -1588,12 +1589,12 @@ let milestonesLoaded = false;
 function showTab(name, updateHash) {
   for (const t of document.querySelectorAll(".tab")) t.setAttribute("aria-selected", String(t.dataset.tab === name));
   for (const n of ["milestones", "xii", "audit", "scores", "jscores"]) $("panel-" + n).hidden = name !== n;
-  if (updateHash) history.replaceState(null, "", name === "xii" ? "#club-xii" : name === "audit" ? "#audit" : name === "scores" ? "#scores" : name === "jscores" ? "#junior-scores" : location.pathname + location.search);
+  if (updateHash) history.replaceState(null, "", name === "xii" ? "#club-xii" : name === "audit" ? "#audit" : name === "scores" ? "#scores" : name === "jscores" ? "#junior-scores" : name === "milestones" ? "#milestones" : location.pathname + location.search);
   if (name === "xii") loadXII();
   else if (name === "audit") loadAudit();
   else if (name === "scores") seniorScores.load();
   else if (name === "jscores") juniorScores.load();
-  else if (!milestonesLoaded) { milestonesLoaded = true; refresh(); }
+  else if (name === "milestones" && !milestonesLoaded) { milestonesLoaded = true; refresh(); }
 }
 document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => showTab(t.dataset.tab, true)));
 document.querySelector(".tabs").addEventListener("keydown", e => {
@@ -1603,7 +1604,7 @@ document.querySelector(".tabs").addEventListener("keydown", e => {
   next.focus(); showTab(next.dataset.tab, true);
 });
 sections.forEach(renderSection); renderWatch();
-showTab(location.hash === "#club-xii" ? "xii" : location.hash === "#audit" ? "audit" : location.hash === "#scores" ? "scores" : location.hash === "#junior-scores" ? "jscores" : "milestones", false);
+showTab(location.hash === "#club-xii" ? "xii" : location.hash === "#audit" ? "audit" : location.hash === "#scores" ? "scores" : location.hash === "#junior-scores" ? "jscores" : location.hash === "#milestones" ? "milestones" : "scores", false);
 </script>
 </body>
 </html>
