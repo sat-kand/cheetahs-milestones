@@ -1017,8 +1017,9 @@ async function buildRecords(api) {
         if (!us || !them) continue;
         const days = (m.matchSchedule || []).map(x => parseDate(x.startDateTime)).filter(d => !isNaN(d)).map(ymdSydney).sort();
         const club = them.owningOrganisation && (them.owningOrganisation.name || them.owningOrganisation.shortName);
+        const sameClub = (seniorBySeason.get(s.id) || new Map()).has(them.id); /* name the team, not the club */
         rows.set(m.id + "|" + t.id, { id: m.id, teamId: t.id, grade: teamLabel(t), season: s.name, date: days[0] || "", won: !!us.isWinner,
-          result: m.resultText || "", us: us.scoreText, them: them.scoreText, opponent: shortClub(club) || them.displayName || "Opponent" });
+          result: m.resultText || "", us: us.scoreText, them: them.scoreText, opponent: (sameClub ? "" : shortClub(club)) || them.displayName || "Opponent" });
       }
     });
   });
@@ -1090,7 +1091,8 @@ async function verifyBest(api, kind, c, teamMap) {
     try {
       const d = lowerKeys(await api.getMatch(x.m.id));
       const them = (d.teams || []).find(t => t.id !== side);
-      if (them) opponent = shortClub(them.owningOrganisation && them.owningOrganisation.name) || them.displayName || "";
+      /* a match against another of our teams names that team, not the club */
+      if (them) opponent = (teamMap.has(them.id) ? "" : shortClub(them.owningOrganisation && them.owningOrganisation.name)) || them.displayName || "";
     } catch (e) { /* name the opponent from the fixture instead */ }
     if (!opponent) {
       const them = (x.m.teams || []).find(t => t.id !== side);
