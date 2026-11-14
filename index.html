@@ -1015,6 +1015,26 @@ function honourRoll(list) {
   return [...list].sort((a, b) => String(b.on).localeCompare(String(a.on)) || a.grade.localeCompare(b.grade));
 }
 
+/* Players who have won four or more of the titles above. Worked out once from Play Cricket: a player counts for a
+   title if they were named in that grand final's squad, or played at least half that team's games that season.
+   Kept here beside the honour roll rather than worked out on every visit, which would mean reading the squad of every
+   match those twenty teams played. */
+const PREMIERSHIP_WINNERS = [
+  { who: "Anil Kumar Reddy Ravula", titles: ["2018 SMCA 12th Div", "2018-19 B7", "2020-21 B4", "2026 SMCA 15th Div"] },
+  { who: "Ganesh Ramanathan", titles: ["2018 SMCA 12th Div", "2018-19 B9", "2019-20 B8", "2025-26 B1"] },
+  { who: "John Bosco", titles: ["2018-19 B9", "2019-20 B8", "2023 Summer T20", "2025-26 B1"] },
+  { who: "Karkuvel Mariappan", titles: ["2020-21 B10", "2021-22 B5", "2023 Spring T20", "2024-25 B3"] },
+  { who: "Manikandan Manoharan", titles: ["2018 SMCA 13th Div", "2018-19 B9", "2019-20 B8", "2025-26 B1"] },
+  { who: "Palanivelan Sivaperuman", titles: ["2015-16 B6", "2018 SMCA 13th Div", "2018-19 B9", "2019-20 B8"] },
+  { who: "Premkumar Senrayar", titles: ["2020-21 B10", "2021-22 B5", "2023 Summer T20", "2024 Spring T20"] },
+  { who: "Sankaranarayanan Elangovan", titles: ["2018 SMCA 12th Div", "2018-19 B9", "2019-20 B8", "2023 Summer T20"] }
+];
+function premiershipList() {
+  return PREMIERSHIP_WINNERS
+    .map(e => ({ who: e.who, value: e.titles.length, show: String(e.titles.length), det: e.titles.join(" · ") }))
+    .sort((a, b) => b.value - a.value || a.who.localeCompare(b.who));
+}
+
 /* ---- Club records (every completed senior match in Play Cricket) ---- */
 const RECORDS_TOP = 10;
 /* "9-307d & 0-0" becomes [{ wickets: 9, runs: 307, text: "9-307d", declared: true }]; an innings that never started is left out.
@@ -1901,7 +1921,7 @@ function renderRecords() {
     dismissals: st => join([plural(num(st.fieldingTotalCatches), "catch", "catches"), num(st.fieldingStumpings) ? plural(num(st.fieldingStumpings), "stumping", "stumpings") : "", num(st.fieldingRunOuts) ? plural(num(st.fieldingRunOuts), "run out", "run outs") : ""])
   };
   const groups = [["Most matches", career.matches, "matches"], ["Most runs", career.runs, "runs"],
-                  ["Most wickets", career.wickets, "wickets"], ["Most dismissals", career.dismissals, "dismissals"],
+                  ["Most wickets", career.wickets, "wickets"], ["Most dismissals", career.dismissals, "dismissals"], ["Most premierships", premiershipList()],
                   ["Highest individual score", d.records.batting], ["Best bowling in an innings", d.records.bowling],
                   ["Highest team total", d.records.totals], ["Highest score chased", d.records.chases],
                   ["Biggest win by runs", d.records.runs], ["Biggest innings win", d.records.innings]];
@@ -1916,7 +1936,9 @@ function renderRecords() {
       const no = document.createElement("span"); no.className = "no"; no.textContent = (i + 1) + ".";
       const val = document.createElement("span"); val.className = "val"; val.textContent = (e.show || fmtNum(e.value)) + (e.who ? " — " + e.who : "");
       const det = document.createElement("span"); det.className = "det";
-      if (careerKey) {
+      if (e.det) {
+        det.textContent = e.det;
+      } else if (careerKey) {
         det.textContent = careerDet[careerKey](e.stats || {});
       } else {
         const scores = e.who ? "" : (r.us || "–") + " v " + (r.them || "–") + " · ";
