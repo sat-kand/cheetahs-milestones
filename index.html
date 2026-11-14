@@ -192,6 +192,18 @@ td.num { font-weight: 700; color: var(--heading); }
 .xii-grid { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
 .card.clean { border-top-color: var(--line); }
 .rec-grid { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.honours { background: var(--brand); border-radius: 8px; padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 16px; }
+.honours h3 { color: #fff; }
+.hon-head { display: flex; align-items: center; gap: 16px; }
+.hon-count { font-family: var(--font-display); font-weight: 700; font-size: 3.6rem; line-height: 0.9; color: var(--gold); font-variant-numeric: tabular-nums; }
+.hon-sub { margin: 2px 0 0; color: var(--on-brand-muted); font-size: 0.9rem; }
+.hon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 10px; }
+.hon { background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 199, 44, 0.35); border-radius: 6px; padding: 9px 11px; display: flex; flex-direction: column; gap: 1px; }
+.hon .s { font-size: 0.76rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--on-brand-muted); }
+.hon .g { font-family: var(--font-display); font-weight: 700; font-size: 1.3rem; line-height: 1.15; color: #fff; }
+.hon .c { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.04em; color: var(--gold); }
+.hon-extra { border-top: 1px solid rgba(255, 255, 255, 0.16); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+@media (max-width: 520px) { .hon-count { font-size: 2.8rem; } .hon-grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); } }
 .rec-grid h3 { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
 .rec { display: grid; grid-template-columns: 1.6em minmax(0, 1fr); gap: 0 6px; }
 .rec .no { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
@@ -354,6 +366,17 @@ td.num { font-weight: 700; color: var(--heading); }
   </div>
 
   <div class="panel" id="panel-records" role="tabpanel" aria-labelledby="tab-records" hidden>
+    <section class="honours" aria-labelledby="h-hon">
+      <div class="hon-head">
+        <span class="hon-count" id="hon-count">0</span>
+        <div>
+          <h3 id="h-hon">Premierships</h3>
+          <p class="hon-sub">Grand finals won by the club</p>
+        </div>
+      </div>
+      <div class="hon-grid" id="hon-grid"></div>
+      <div class="hon-extra" id="hon-extra"></div>
+    </section>
     <div class="toolbar">
       <div class="actions"><button type="button" class="refresh" id="rec-refresh">Refresh</button></div>
     </div>
@@ -962,6 +985,37 @@ async function buildScores(api, now, kind) {
     });
   }
   return { round, rows, failedTeams };
+}
+
+/* ---- Honour roll ----
+   Kept by hand, because four of these grand finals were washed out or abandoned and the premiership went to the minor
+   premier, which Play Cricket does not record. Newest first; `on` is only for ordering. */
+const HONOURS = [
+  { on: "2026-08", season: "Winter 2026", comp: "SMCA", grade: "15th Division" },
+  { on: "2026-03", season: "2025-26", comp: "PDCA", grade: "B1" },
+  { on: "2025-03", season: "2024-25", comp: "PDCA", grade: "B3" },
+  { on: "2025-03", season: "2024-25", comp: "PDCA", grade: "B11" },
+  { on: "2024-12", season: "Spring 2024", comp: "PDCA", grade: "T20" },
+  { on: "2024-03", season: "2023-24", comp: "PDCA", grade: "B4" },
+  { on: "2023-12", season: "Spring 2023", comp: "PDCA", grade: "T20" },
+  { on: "2023-03", season: "Summer 2023", comp: "PDCA", grade: "T20" },
+  { on: "2022-03", season: "2021-22", comp: "PDCA", grade: "B5" },
+  { on: "2021-03", season: "2020-21", comp: "PDCA", grade: "B4" },
+  { on: "2021-03", season: "2020-21", comp: "PDCA", grade: "B10" },
+  { on: "2020-03", season: "2019-20", comp: "PDCA", grade: "B8" },
+  { on: "2019-03", season: "2018-19", comp: "PDCA", grade: "B7" },
+  { on: "2019-03", season: "2018-19", comp: "PDCA", grade: "B9" },
+  { on: "2018-08", season: "Winter 2018", comp: "SMCA", grade: "13th Division" },
+  { on: "2018-08", season: "Winter 2018", comp: "SMCA", grade: "12th Division" },
+  { on: "2016-03", season: "2015-16", comp: "PDCA", grade: "B6" },
+  { on: "2016-03", season: "2015-16", comp: "NDCA", grade: "5th Grade" }
+];
+const CONSOLATIONS = [
+  { on: "2026-08", season: "Winter 2026", comp: "SMCA", grade: "Consolation 3rd Division" },
+  { on: "2025-09", season: "Winter 2025", comp: "SMCA", grade: "Consolation 4th Division" }
+];
+function honourRoll(list) {
+  return [...list].sort((a, b) => String(b.on).localeCompare(String(a.on)) || a.grade.localeCompare(b.grade));
 }
 
 /* ---- Club records (every completed senior match in Play Cricket) ---- */
@@ -1806,6 +1860,31 @@ function scoresTab(prefix, kind, word) {
 const seniorScores = scoresTab("s", "senior", "Senior");
 const juniorScores = scoresTab("j", "junior", "Junior");
 
+/* ---- Honour roll ---- */
+function honourTile(h) {
+  const t = document.createElement("div"); t.className = "hon";
+  const s = document.createElement("span"); s.className = "s"; s.textContent = h.season;
+  const g = document.createElement("span"); g.className = "g"; g.textContent = h.grade;
+  const c = document.createElement("span"); c.className = "c"; c.textContent = h.comp;
+  t.append(s, g, c);
+  return t;
+}
+function renderHonours() {
+  $("hon-count").textContent = HONOURS.length;
+  const grid = $("hon-grid");
+  grid.innerHTML = "";
+  for (const h of honourRoll(HONOURS)) grid.appendChild(honourTile(h));
+  const extra = $("hon-extra");
+  extra.innerHTML = "";
+  if (!CONSOLATIONS.length) return;
+  const head = document.createElement("p"); head.className = "hon-sub";
+  head.textContent = CONSOLATIONS.length + " consolation " + (CONSOLATIONS.length === 1 ? "championship" : "championships");
+  const row = document.createElement("div"); row.className = "hon-grid";
+  for (const h of honourRoll(CONSOLATIONS)) row.appendChild(honourTile(h));
+  extra.append(head, row);
+}
+renderHonours();
+
 /* ---- Records tab: loaded the first time it is opened, then only on Refresh (it reads every season) ---- */
 let records = { state: "idle", data: null };
 function fmtDate3(ymd) {
@@ -1832,10 +1911,10 @@ function renderRecords() {
     wickets: st => join([st.bowlingBestInnings ? "best " + st.bowlingBestInnings : "", st.bowlingAverage != null ? "average " + st.bowlingAverage : ""]),
     dismissals: st => join([plural(num(st.fieldingTotalCatches), "catch", "catches"), num(st.fieldingStumpings) ? plural(num(st.fieldingStumpings), "stumping", "stumpings") : "", num(st.fieldingRunOuts) ? plural(num(st.fieldingRunOuts), "run out", "run outs") : ""])
   };
-  const groups = [["Highest individual score", d.records.batting], ["Best bowling in an innings", d.records.bowling],
-                  ["Most runs", career.runs, "runs"], ["Most wickets", career.wickets, "wickets"],
-                  ["Most matches", career.matches, "matches"], ["Most dismissals", career.dismissals, "dismissals"],
-                  ["Highest score chased", d.records.chases], ["Highest team total", d.records.totals],
+  const groups = [["Most matches", career.matches, "matches"], ["Most runs", career.runs, "runs"],
+                  ["Most wickets", career.wickets, "wickets"], ["Most dismissals", career.dismissals, "dismissals"],
+                  ["Highest individual score", d.records.batting], ["Best bowling in an innings", d.records.bowling],
+                  ["Highest team total", d.records.totals], ["Highest score chased", d.records.chases],
                   ["Biggest win by runs", d.records.runs], ["Biggest innings win", d.records.innings]];
   for (const [title, list, careerKey] of groups) {
     const card = document.createElement("section"); card.className = "card"; card.setAttribute("aria-label", title);
